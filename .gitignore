@@ -1,0 +1,42 @@
+# Security & Environments
+.env
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Linting & Formatting
+.ruff_cache/
+.mypy_cache/
+.pyright_cache/
+
+# Logs
+logs/
+*.log
+
+# Databases
+*.sqlite3
+
+# Project specific exceptions
+!.env.example
