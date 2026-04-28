@@ -14,10 +14,20 @@ class Base(DeclarativeBase):
     pass
 
 
+class Role(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False
+    )  # hr_manager, admin, viewer
+    # List of permissions, e.g., ["view_unmasked", "upload_docs"]
+    permissions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+
 class User(Base):
     __tablename__ = "users"
 
-    # Using UUID to prevent IDOR (Insecure Direct Object Reference) vulnerabilities
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
@@ -25,9 +35,12 @@ class User(Base):
         String(255), unique=True, index=True, nullable=False
     )
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(
-        String(50), nullable=False
-    )  # e.g., hr_manager, admin, viewer
+
+    # Updated to establish a foreign key relationship with Role
+    role_name: Mapped[str] = mapped_column(
+        ForeignKey("roles.name", ondelete="RESTRICT"), nullable=False
+    )
+
     department_id: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
