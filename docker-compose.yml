@@ -1,0 +1,62 @@
+# Infrastructure setup for Secure Enterprise RAG
+# Defines FastAPI app, Qdrant, Redis, and PostgreSQL services [cite: 243]
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - qdrant
+      - redis
+      - postgres
+    networks:
+      - rag-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    # Ensure AOF persistence is enabled for durability [cite: 246]
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag-network
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - rag-network
+
+# Dedicated bridge network for isolated service communication [cite: 248]
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  qdrant_data:
+  redis_data:
+  postgres_data:
