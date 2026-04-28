@@ -40,3 +40,6 @@ logs/
 
 # Project specific exceptions
 !.env.example
+
+collect_context.py
+project_context.txt
