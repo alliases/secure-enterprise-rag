@@ -1,23 +1,25 @@
-# File: app/auth/security.py
-# Purpose: Password hashing and verification using bcrypt.
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
-from passlib.context import CryptContext
-
-# Define the bcrypt context. "deprecated=auto" ensures that if we upgrade
-# algorithms in the future, old hashes will be transparently re-hashed.
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Initialize Argon2id hasher with default OWASP recommended parameters
+# Memory cost, time cost, and parallelism are managed automatically
+ph = PasswordHasher()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Safely compares a plaintext password against a bcrypt hash.
-    Protects against timing attacks natively.
+    Safely compares a plaintext password against an Argon2id hash.
+    Catches VerifyMismatchError to return a simple boolean for the auth flow.
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        # Note: argon2 requires the hash as the first argument
+        return ph.verify(hashed_password, plain_password)
+    except VerifyMismatchError:
+        return False
 
 
 def get_password_hash(password: str) -> str:
     """
-    Generates a secure bcrypt hash for a new password.
+    Generates a secure Argon2id hash for a new password.
     """
-    return pwd_context.hash(password)
+    return ph.hash(password)
