@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from redis.asyncio import from_url  # type: ignore[reportUnknownVariableType]
 
 from app.api.router import api_router
 from app.config import get_settings
@@ -30,14 +31,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     engine = create_engine(str(settings.postgres_dsn))
     app.state.session_factory = get_session_factory(engine)
 
-    # TODO: Initialize Redis pool and Qdrant client here
+    # Initialize Redis pool
+    app.state.redis = from_url(
+        settings.redis_url,
+        encoding="utf-8",
+        decode_responses=False,  # Keep as bytes to avoid implicit decoding errors later
+    )
 
     yield  # Server is running and handling requests
 
     # Shutdown Phase
     logger.info("Shutting down components gracefully...")
     await engine.dispose()
-    # TODO: Close Redis and Qdrant connections here
+    await app.state.redis.aclose()
 
 
 def create_app() -> FastAPI:
