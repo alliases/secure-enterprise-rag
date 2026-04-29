@@ -1,34 +1,38 @@
-# Stage 1: Builder phase for installing dependencies [cite: 60]
-FROM python:3.11-slim as builder
+# Stage 1: Builder phase for installing dependencies
+FROM python:3.13-slim as builder
 
-# Set working directory for build
 WORKDIR /build
 
-# Copy requirements and install packages without cache to reduce layer size
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && rm -rf /root/.cache/pip
+# Install poetry
+RUN pip install --no-cache-dir poetry
 
-# Stage 2: Runtime phase [cite: 60]
-FROM python:3.11-slim
+# Copy poetry config files
+COPY pyproject.toml poetry.lock* ./
 
-# Create a non-root user to avoid running the application as root
+# Configure poetry to not use virtualenvs, then install main dependencies
+RUN poetry config virtualenvs.create false \
+    && poetry install --only main --no-interaction --no-ansi
+
+# Stage 2: Runtime phase
+FROM python:3.13-slim
+
+# Create a non-root user
 RUN useradd -m -r appuser
 
 WORKDIR /app
 
-# Copy installed packages and binaries from the builder stage
-COPY --from=builder /usr/local/lib/python3.11/site-packages/ /usr/local/lib/python3.11/site-packages/
+# Copy installed packages and binaries (Updated paths to python3.13)
+COPY --from=builder /usr/local/lib/python3.13/site-packages/ /usr/local/lib/python3.13/site-packages/
 COPY --from=builder /usr/local/bin/ /usr/local/bin/
 
-# Copy application source code [cite: 60]
+# Copy application source code
 COPY app/ /app/app/
 
-# Restrict permissions to the non-root user
+# Restrict permissions
 RUN chown -R appuser:appuser /app
 
-# Switch context to non-root user
+# Switch context
 USER appuser
 
-# Define the default entrypoint to run the FastAPI application [cite: 60]
+# Define the default entrypoint
 ENTRYPOINT ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
