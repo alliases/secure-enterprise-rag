@@ -42,4 +42,5 @@ logs/
 !.env.example
 
 collect_context.py
+collect_context.pyw
 project_context.txt
