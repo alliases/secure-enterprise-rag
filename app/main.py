@@ -5,12 +5,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from qdrant_client import AsyncQdrantClient
 from redis.asyncio import from_url  # type: ignore[reportUnknownVariableType]
 
 from app.api.router import api_router
 from app.config import get_settings
 from app.db.session import create_engine, get_session_factory
 from app.logging_config.setup import configure_logging, get_logger
+from app.vectorstore.qdrant_client import init_collection
 
 logger = get_logger(__name__)
 
@@ -35,8 +37,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.redis = from_url(
         settings.redis_url,
         encoding="utf-8",
-        decode_responses=False,  # Keep as bytes to avoid implicit decoding errors later
+        decode_responses=False,
     )
+
+    # Initialize Qdrant Client
+    app.state.qdrant = AsyncQdrantClient(
+        host=settings.qdrant_host, port=settings.qdrant_port
+    )
+
+    # Pre-warm connection and ensure collection structure exists
+    await init_collection(app.state.qdrant, "documents", 1536)
 
     yield  # Server is running and handling requests
 
@@ -44,6 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Shutting down components gracefully...")
     await engine.dispose()
     await app.state.redis.aclose()
+    await app.state.qdrant.close()  # Added closing Qdrant connection
 
 
 def create_app() -> FastAPI:

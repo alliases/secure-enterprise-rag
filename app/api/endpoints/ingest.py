@@ -17,11 +17,12 @@ from fastapi import (
     UploadFile,
     status,
 )
+from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Document
-from app.dependencies import get_current_user, get_db_session, get_redis
+from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
 from app.ingestion.pipeline import run_ingestion
 from app.logging_config.setup import get_logger
 
@@ -42,6 +43,7 @@ async def upload_document(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
+    qdrant: AsyncQdrantClient = Depends(get_qdrant),
 ) -> dict[str, Any]:
     """
     Accepts a document file, saves it temporarily, and starts the ingestion background task.
@@ -91,6 +93,7 @@ async def upload_document(
         access_level=access_level,
         user_id=current_user["user_id"],
         redis=redis,
+        qdrant=qdrant,
         session_factory=session_factory,
     )
 

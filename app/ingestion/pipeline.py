@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -16,6 +17,8 @@ from app.ingestion.parser import parse_document
 from app.logging_config.setup import get_logger
 from app.masking.mapping_store import store_mappings
 from app.masking.presidio_engine import analyze_text, mask_text
+from app.vectorstore.embedder import embed_texts
+from app.vectorstore.qdrant_client import upsert_chunks
 
 # Placeholder for Task 2.2 imports
 # from app.vectorstore.embedder import embed_texts
@@ -33,6 +36,7 @@ async def run_ingestion(
     access_level: int,
     user_id: str,
     redis: Redis,
+    qdrant: AsyncQdrantClient,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     """
@@ -82,13 +86,11 @@ async def run_ingestion(
                     }
                 )
 
-            # 5 & 6. Embed and Upsert (Awaiting implementation in Task 2.2)
-            # vectors = embed_texts([c["text"] for c in masked_chunks_data], "text-embedding-3-small")
-            # await upsert_chunks("documents", masked_chunks_data, vectors, qdrant)
-            logger.info(
-                "Skipped embedding and upsert (awaiting Task 2.2)",
-                document_id=document_id,
-            )
+            # 5 & 6. Embed and Upsert
+            vectors = await embed_texts([c["text"] for c in masked_chunks_data])
+            await upsert_chunks(qdrant, "documents", masked_chunks_data, vectors)
+
+            logger.info("Embedded and upserted chunks", document_id=document_id)
 
             # 7. Update status to done
             doc.status = "done"

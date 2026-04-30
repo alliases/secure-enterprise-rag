@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,13 @@ async def get_redis(request: Request) -> Redis:
     Returns an active Redis client from the global application state.
     """
     return request.app.state.redis
+
+
+async def get_qdrant(request: Request) -> AsyncQdrantClient:
+    """
+    Returns an active Qdrant client from the global application state.
+    """
+    return request.app.state.qdrant
 
 
 async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession]:
