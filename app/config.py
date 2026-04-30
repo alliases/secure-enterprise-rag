@@ -21,6 +21,9 @@ class Settings(BaseSettings):
 
     # ML Models
     embedding_model: str = "text-embedding-3-small"
+    local_model_revision: str | None = (
+        None  # e.g., "main" or specific commit hash for safetensors
+    )
     llm_model: str = "gpt-4o"
 
     # RAG Configuration

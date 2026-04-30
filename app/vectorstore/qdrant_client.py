@@ -1,6 +1,5 @@
 # File: app/vectorstore/qdrant_client.py
 # Purpose: Qdrant vector database operations (collections, upserts, searches).
-# === File: app/vectorstore/qdrant_client.py ===
 from typing import Any, Protocol, cast
 
 from qdrant_client import AsyncQdrantClient
@@ -9,7 +8,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
-    PayloadSchemaType,  # Added explicit Enum for schema types
+    PayloadSchemaType,
     PointStruct,
     ScoredPoint,
     VectorParams,
@@ -20,15 +19,20 @@ from app.logging_config.setup import get_logger
 logger = get_logger(__name__)
 
 
-# Protocol bypass for untyped .search() from previous step
+# 1. Define a custom protocol for QueryResponse to fix missing '.points' stub in Qdrant
+class QueryResponseProtocol(Protocol):
+    points: list[ScoredPoint]
+
+
+# 2. Update protocol to return our strictly typed Response Protocol
 class AsyncQdrantSearcher(Protocol):
-    async def search(
+    async def query_points(
         self,
         collection_name: str,
-        query_vector: list[float],
+        query: list[float],
         query_filter: Filter | None = None,
         limit: int = 10,
-    ) -> list[ScoredPoint]: ...
+    ) -> QueryResponseProtocol: ...
 
 
 async def init_collection(
@@ -53,7 +57,6 @@ async def init_collection(
         vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
     )
 
-    # Use strict Enum types from Qdrant models instead of raw strings or literals
     await client.create_payload_index(
         collection_name=collection_name,
         field_name="department_id",
@@ -112,18 +115,18 @@ async def search_similar(
         ]
     )
 
-    # 3. Cast the client to our local Protocol to ensure 100% Type Safety
     search_client = cast(AsyncQdrantSearcher, client)
 
-    search_result: list[ScoredPoint] = await search_client.search(
+    # query_response is strictly typed thanks to our Protocol
+    query_response = await search_client.query_points(
         collection_name=collection_name,
-        query_vector=query_vector,
+        query=query_vector,
         query_filter=query_filter,
         limit=top_k,
     )
 
     results: list[dict[str, Any]] = []
-    for hit in search_result:
+    for hit in query_response.points:
         results.append(
             {
                 "id": hit.id,

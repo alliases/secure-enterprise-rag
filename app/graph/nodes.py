@@ -1,0 +1,149 @@
+# File: app/graph/nodes.py
+# Purpose: LangGraph execution nodes for the RAG pipeline.
+
+from typing import Any, cast
+
+from langchain_core.runnables import RunnableConfig
+from qdrant_client import AsyncQdrantClient
+from redis.asyncio import Redis
+
+from app.graph.state import RAGState
+from app.logging_config.setup import get_logger
+from app.masking.demasker import demask_response
+from app.masking.presidio_engine import analyze_text, mask_text
+from app.vectorstore.retriever import retrieve_context
+
+# Placeholder imports for Task 2.3.2
+# from app.llm.prompts import RAG_SYSTEM_PROMPT
+# from app.llm.provider import get_llm_response
+
+logger = get_logger(__name__)
+
+
+async def query_analyzer_node(state: RAGState) -> dict[str, Any]:
+    """
+    Analyzes the incoming query for PII and masks it before any external API calls.
+    """
+    original_query = str(state.get("original_query", ""))
+
+    analyzer_results = analyze_text(original_query)
+    masked_result = mask_text(original_query, analyzer_results)
+
+    logger.info("Query analysis complete", pii_found=len(analyzer_results))
+
+    return {
+        "masked_query": masked_result.masked_text,
+        "pii_mappings": masked_result.mappings,
+    }
+
+
+async def retriever_node(state: RAGState, config: RunnableConfig) -> dict[str, Any]:
+    """
+    Retrieves relevant context from Qdrant using the masked query and RBAC filters.
+    """
+    masked_query = str(state.get("masked_query", ""))
+
+    # Вилучено cast, оскільки RAGState вже гарантує тип dict[str, Any]
+    user = state.get("user", {})
+    filters = state.get("filters", {})
+
+    configurable = config.get("configurable", {})
+    qdrant_instance = configurable.get("qdrant")
+
+    if qdrant_instance is None:
+        raise RuntimeError("Qdrant client not provided in RunnableConfig")
+
+    qdrant = cast(AsyncQdrantClient, qdrant_instance)
+
+    department_id = str(user.get("department_id", ""))
+    access_level = int(filters.get("access_level", 1))
+
+    retrieved_chunks = await retrieve_context(
+        masked_query=masked_query,
+        department_id=department_id,
+        access_level=access_level,
+        qdrant=qdrant,
+        top_k=5,
+    )
+
+    document_ids = list(
+        {str(chunk.metadata.get("document_id", "")) for chunk in retrieved_chunks}
+    )
+
+    return {
+        "retrieved_chunks": retrieved_chunks,
+        "document_ids": document_ids,
+    }
+
+
+async def synthesizer_node(state: RAGState) -> dict[str, Any]:
+    """
+    Generates a response using the LLM based strictly on the retrieved masked context.
+    """
+    masked_query = str(state.get("masked_query", ""))
+
+    # Вилучено cast, RAGState контролює тип списку
+    chunks = state.get("retrieved_chunks", [])
+
+    context_texts = (
+        [str(getattr(chunk, "text", "")) for chunk in chunks]
+        if chunks
+        else ["No context available."]
+    )
+
+    response = (
+        f"Mocked LLM Response containing [PERSON_1] based on {len(context_texts)} chunks. "
+        f"Query: {masked_query}"
+    )
+
+    return {"llm_response": response}
+
+
+async def validator_node(state: RAGState) -> dict[str, Any]:
+    """
+    Heuristic validation to detect prompt injection leakage.
+    """
+    response = str(state.get("llm_response", ""))
+
+    if "STRICT CONSTRAINTS:" in response or "You are a highly secure" in response:
+        logger.warning("System prompt leakage detected in LLM response")
+        return {
+            "llm_response": "Security Error: Invalid response generated.",
+            "error": "prompt_leakage",
+        }
+
+    return {}
+
+
+async def demasking_node(state: RAGState, config: RunnableConfig) -> dict[str, Any]:
+    """
+    Restores PII from Redis and local state mappings for authorized users.
+    """
+    llm_response = str(state.get("llm_response", ""))
+
+    # Вилучено всі cast, делегуємо перевірку типів еталонному RAGState
+    document_ids = state.get("document_ids", [])
+    user = state.get("user", {})
+    query_mappings = state.get("pii_mappings", {})
+
+    configurable = config.get("configurable", {})
+    redis_instance = configurable.get("redis")
+
+    if redis_instance is None:
+        raise RuntimeError("Redis client not provided in RunnableConfig")
+
+    redis = cast(Redis, redis_instance)
+    department_id = str(user.get("department_id", ""))
+
+    demasked_response = await demask_response(
+        response_text=llm_response,
+        document_ids=document_ids,
+        target_department_id=department_id,
+        redis=redis,
+        user=user,
+    )
+
+    for token, original in query_mappings.items():
+        demasked_response = demasked_response.replace(str(token), str(original))
+
+    return {"final_response": demasked_response}

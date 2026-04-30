@@ -1,6 +1,6 @@
 # File: app/vectorstore/embedder.py
 # Purpose: Generation of text embeddings using OpenAI or local SentenceTransformers.
-
+# === File: app/vectorstore/embedder.py ===
 import asyncio
 from typing import Any, Protocol, cast
 
@@ -27,9 +27,24 @@ def _get_local_model(model_name: str) -> SentenceEncoder:
     """
     global _local_model
     if _local_model is None:
-        logger.info("Initializing local embedding model", model_name=model_name)
-        # Cast the untyped model to our Protocol to satisfy Strict Mode
-        _local_model = cast(SentenceEncoder, SentenceTransformer(model_name))
+        settings = get_settings()
+        logger.info(
+            "Initializing local embedding model",
+            model_name=model_name,
+            revision=settings.local_model_revision,
+        )
+
+        # Eliminate intermediate variable to prevent reportUnknownVariableType.
+        # Cast the untyped instantiation directly to our Protocol.
+        _local_model = cast(
+            SentenceEncoder,
+            SentenceTransformer(
+                model_name_or_path=model_name,
+                revision=settings.local_model_revision,
+                trust_remote_code=False,
+            ),
+        )
+
     return _local_model
 
 
@@ -48,19 +63,16 @@ async def embed_texts(
         client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
         response = await client.embeddings.create(input=texts, model=target_model)
 
-        # Removed unnecessary cast; OpenAI SDK properly types 'embedding' as List[float]
         return [data.embedding for data in response.data]
     else:
         logger.debug("Generating embeddings locally", batch_size=len(texts))
         local_model = _get_local_model(target_model)
 
-        # 2. Wrapper function to provide strict typing for asyncio.to_thread
         def _encode_wrapper(texts_to_encode: list[str]) -> Any:
             return local_model.encode(texts_to_encode)
 
         embeddings: Any = await asyncio.to_thread(_encode_wrapper, texts)
 
-        # Cast to primitive types, as SentenceTransformers returns NumPy tensors
         return [cast(list[float], emb.tolist()) for emb in embeddings]  # type: ignore[reportUnknownMemberType]
 
 
