@@ -8,14 +8,12 @@ from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
 from app.graph.state import RAGState
+from app.llm.prompts import RAG_SYSTEM_PROMPT
+from app.llm.provider import get_llm_response
 from app.logging_config.setup import get_logger
 from app.masking.demasker import demask_response
 from app.masking.presidio_engine import analyze_text, mask_text
 from app.vectorstore.retriever import retrieve_context
-
-# Placeholder imports for Task 2.3.2
-# from app.llm.prompts import RAG_SYSTEM_PROMPT
-# from app.llm.provider import get_llm_response
 
 logger = get_logger(__name__)
 
@@ -91,9 +89,10 @@ async def synthesizer_node(state: RAGState) -> dict[str, Any]:
         else ["No context available."]
     )
 
-    response = (
-        f"Mocked LLM Response containing [PERSON_1] based on {len(context_texts)} chunks. "
-        f"Query: {masked_query}"
+    response = await get_llm_response(
+        system_prompt=RAG_SYSTEM_PROMPT,
+        user_message=masked_query,
+        context_chunks=context_texts,
     )
 
     return {"llm_response": response}
