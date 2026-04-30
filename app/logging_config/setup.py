@@ -21,13 +21,31 @@ def pii_sanitizer(
     """
     Structlog processor that redacts PII from log messages.
     Acts as a failsafe before logs are shipped to external systems.
+    Flags events where leakage was prevented for security alerting.
     """
+    leak_detected = False
+
     for key, value in event_dict.items():
         if isinstance(value, str):
+            original_value = value
+
             value = EMAIL_PATTERN.sub("[REDACTED_EMAIL]", value)
             value = PHONE_PATTERN.sub("[REDACTED_PHONE]", value)
             value = CREDIT_CARD_PATTERN.sub("[REDACTED_CC]", value)
+
+            # Detect if the string was mutated by any of the regex patterns
+            if value != original_value:
+                leak_detected = True
+
             event_dict[key] = value
+
+    if leak_detected:
+        # Inject a high-priority security flag into the JSON log payload
+        # This allows SIEM (e.g., Elastic, Splunk) to trigger incident alerts
+        event_dict["security_alert"] = "pii_leak_attempt_prevented"
+        # Elevate log level dynamically to ensure visibility in monitoring dashboards
+        event_dict["level"] = "warning"
+
     return event_dict
 
 
