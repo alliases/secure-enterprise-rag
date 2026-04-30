@@ -100,6 +100,9 @@ typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
 reportMissingImports = true
 extraPaths = ["."]
+reportMissingTypeStubs = true      # Force checking for missing stubs
+reportUnusedImport = "error"       # Cleanliness standard
+reportUnusedVariable = "error"     # Security/Cleanliness
 
 [[tool.pyright.executionEnvironments]]
 root = "tests"
