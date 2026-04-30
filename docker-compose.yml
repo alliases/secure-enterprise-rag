@@ -1,7 +1,5 @@
 # Infrastructure setup for Secure Enterprise RAG
 # Defines FastAPI app, Qdrant, Redis, and PostgreSQL services [cite: 243]
-version: '3.8'
-
 services:
   app:
     build:
