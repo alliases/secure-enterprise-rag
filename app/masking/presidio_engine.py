@@ -47,8 +47,20 @@ def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResu
     Replaces identified PII entities with incremental tokens (e.g., [PERSON_1]).
     Extracts mappings for later de-masking.
     """
-    # Sort results by start position descending to avoid index shifting during string manipulation
-    sorted_results = sorted(analyzer_results, key=lambda x: x.start, reverse=True)
+    # 1. Resolve overlaps using Greedy Interval Scheduling
+    # Sort priority: Earliest start -> Longest length -> Highest confidence score
+    sorted_for_overlap = sorted(
+        analyzer_results, key=lambda x: (x.start, -x.end, -x.score)
+    )
+    filtered_results: list[RecognizerResult] = []
+
+    for res in sorted_for_overlap:
+        # If the start of the current entity is before the end of the last added entity, it's an overlap. Skip it.
+        if not filtered_results or res.start >= filtered_results[-1].end:
+            filtered_results.append(res)
+
+    # 2. Sort results by start position descending to avoid index shifting during string manipulation
+    sorted_results = sorted(filtered_results, key=lambda x: x.start, reverse=True)
 
     masked_text = text
     mappings: dict[str, str] = {}

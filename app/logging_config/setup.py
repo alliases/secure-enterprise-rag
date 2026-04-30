@@ -3,9 +3,10 @@
 
 import logging
 import re
+from collections.abc import MutableMapping
+from typing import Any
 
 import structlog
-from structlog.typing import EventDict
 
 from app.config import get_settings
 
@@ -16,8 +17,8 @@ CREDIT_CARD_PATTERN = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
 
 
 def pii_sanitizer(
-    logger: logging.Logger, name: str, event_dict: EventDict
-) -> EventDict:
+    logger: logging.Logger, name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     """
     Structlog processor that redacts PII from log messages.
     Acts as a failsafe before logs are shipped to external systems.
