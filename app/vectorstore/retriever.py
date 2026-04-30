@@ -2,8 +2,9 @@
 # Purpose: Retrieval logic with filtering and reranking based on Qdrant.
 
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
+from pydantic import BaseModel, ValidationError
 from qdrant_client import AsyncQdrantClient
 
 from app.logging_config.setup import get_logger
@@ -11,6 +12,20 @@ from app.vectorstore.embedder import embed_query
 from app.vectorstore.qdrant_client import search_similar
 
 logger = get_logger(__name__)
+
+
+class QdrantPayload(BaseModel):
+    """
+    Pydantic schema for strict runtime validation of Qdrant payloads.
+    Ensures all required RBAC and mapping fields are present to prevent downstream crashes.
+    """
+
+    text: str
+    document_id: str
+    department_id: str
+    access_level: int
+    source_filename: str
+    chunk_index: int
 
 
 @dataclass
@@ -37,11 +52,8 @@ async def retrieve_context(
     """
     logger.info("Retrieving context for query", department_id=department_id)
 
-    # 1. Embed the masked query
-    # The query is already masked by Presidio before reaching this point
     query_vector = await embed_query(masked_query)
 
-    # 2. Search in Qdrant with hardware-accelerated metadata filters
     raw_results = await search_similar(
         client=qdrant,
         collection_name="documents",
@@ -57,10 +69,8 @@ async def retrieve_context(
         logger.debug("No results found in Qdrant for the given filters.")
         return processed_chunks
 
-    # 3. Threshold Check
-    # Explicitly type the result of .get() to avoid Unknown type propagation
-    first_score_val: Any = raw_results[0].get("score", 0.0)
-    highest_score = float(first_score_val)
+    # search_similar explicitly returns list[dict[str, Any]] with a guaranteed "score" float key
+    highest_score = float(raw_results[0]["score"])
 
     if highest_score < 0.3:
         logger.info(
@@ -70,29 +80,23 @@ async def retrieve_context(
         )
         return processed_chunks
 
-    # 4. Parse payload and map to data classes
     for hit in raw_results:
-        raw_payload: Any = hit.get("payload", {})
-        if not isinstance(raw_payload, dict):
+        try:
+            # Runtime validation: instantly catches missing fields or type mismatches from DB
+            validated_payload = QdrantPayload.model_validate(hit["payload"])
+        except ValidationError as e:
+            logger.error(
+                "Invalid payload format from Qdrant", error=str(e), hit_id=hit["id"]
+            )
             continue
 
-        # Cast the built-in dict[Unknown, Unknown] to dict[str, Any] to satisfy Strict Mode
-        payload = cast(dict[str, Any], raw_payload)
-
-        raw_text: Any = payload.get("text", "")
-        text = str(raw_text)
-
-        # Explicitly declare types for dictionary comprehension variables
-        metadata: dict[str, Any] = {
-            str(k): v for k, v in payload.items() if str(k) != "text"
-        }
-
-        raw_score: Any = hit.get("score", 0.0)
-        score = float(raw_score)
+        # Extract metadata dynamically while safely omitting the text field
+        metadata = validated_payload.model_dump(exclude={"text"})
+        score = float(hit["score"])
 
         processed_chunks.append(
             RetrievedChunk(
-                text=text,
+                text=validated_payload.text,
                 metadata=metadata,
                 score=score,
             )
