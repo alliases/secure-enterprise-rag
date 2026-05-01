@@ -1,0 +1,66 @@
+# File: .github/workflows/ci.yml
+# Purpose: Continuous Integration pipeline for testing and validation.
+
+name: Enterprise RAG CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  quality-assurance:
+    name: Lint, Type Check, and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.1.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install Dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Enforce Formatting (Ruff)
+        run: poetry run ruff format --check .
+
+      - name: Linting (Ruff)
+        run: poetry run ruff check .
+
+      - name: Strict Type Checking (Pyright)
+        run: poetry run pyright .
+
+      - name: Run Unit & Integration Tests (Pytest)
+        run: poetry run pytest tests/ -v
+
+  docker-build:
+    name: Verify Docker Production Build
+    runs-on: ubuntu-latest
+    needs: quality-assurance
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Production Image
+        run: docker build -t secure-enterprise-rag:test .

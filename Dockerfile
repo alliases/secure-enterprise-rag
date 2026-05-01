@@ -11,7 +11,8 @@ COPY pyproject.toml poetry.lock* ./
 
 # Configure poetry to not use virtualenvs, then install main dependencies
 RUN poetry config virtualenvs.create false \
-    && poetry install --only main --no-interaction --no-ansi
+    && poetry install --only main --no-interaction --no-ansi \
+    && python -m spacy download en_core_web_lg
 
 # Stage 2: Runtime phase
 FROM python:3.13-slim

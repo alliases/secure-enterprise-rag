@@ -38,8 +38,6 @@ logs/
 # Databases
 *.sqlite3
 
-# Project specific exceptions
-!.env.example
 
 collect_context.py
 collect_context.pyw
