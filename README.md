@@ -39,35 +39,7 @@ Secure Enterprise RAG lets authorized users query confidential HR documents in n
 
 ## 🏗 Architecture
 
-```
-User Request (JWT)
-      │
-      ▼
-┌─────────────────────────────────────────────────────┐
-│  FastAPI  (Auth → RBAC → Endpoint)                  │
-└──────────────────────┬──────────────────────────────┘
-                       │
-                       ▼
-          ┌────────────────────────┐
-          │  LangGraph RAG Graph   │
-          │                        │
-          │  query_analyzer_node   │  ← Presidio masks query PII
-          │         │              │
-          │  retriever_node        │  ← Qdrant (dept + access filter)
-          │         │              │
-          │  synthesizer_node      │  ← OpenAI GPT-4o (masked context only)
-          │         │              │
-          │  validator_node        │  ← Heuristic prompt-injection guard
-          │         │              │
-          │  demasking_node        │  ← Redis lookup, RBAC check
-          └────────────────────────┘
-                       │
-                       ▼
-             Final Response (masked or de-masked)
-                       │
-                       ▼
-               AuditLog → PostgreSQL
-```
+![System Architecture](docs/assets/architecture.svg)
 
 ---
 
