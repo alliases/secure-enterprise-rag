@@ -11,19 +11,37 @@ import fakeredis.aioredis
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
 
 from app.auth.jwt_handler import create_access_token
 from app.db.models import Base
 
 
-@pytest_asyncio.fixture
-async def db_session() -> AsyncGenerator[AsyncSession]:
+@pytest.fixture(scope="session")
+def postgres_container() -> Generator[PostgresContainer]:
     """
-    Creates a fresh SQLite in-memory database for each test.
-    Ensures complete isolation of database states between tests.
+    Spins up a real PostgreSQL container once per test session.
+    Ensures Dev/Prod parity for tests involving DB-specific features (UUIDs, JSONB).
     """
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    with PostgresContainer("postgres:16-alpine") as postgres:
+        yield postgres
 
+
+@pytest_asyncio.fixture
+async def db_session(
+    postgres_container: PostgresContainer,
+) -> AsyncGenerator[AsyncSession]:
+    """
+    Provides an isolated database session.
+    Creates and drops tables dynamically per test using the session-scoped container.
+    """
+    # testcontainers returns psycopg2 URL by default, swap it to asyncpg
+    sync_url = postgres_container.get_connection_url()
+    async_url = sync_url.replace("psycopg2", "asyncpg")
+
+    engine = create_async_engine(async_url, echo=False)
+
+    # Initialize clean schema for the specific test
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -33,6 +51,7 @@ async def db_session() -> AsyncGenerator[AsyncSession]:
         yield session
         await session.rollback()
 
+    # Teardown schema to ensure complete isolation for the next test
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
