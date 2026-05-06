@@ -49,6 +49,7 @@ argon2-cffi = "^25.1.0"
 tenacity = "^9.1.4"
 python-docx = "^1.2.0"
 sentence-transformers = "^5.4.1"
+slowapi = "^0.1.9"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

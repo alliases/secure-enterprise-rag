@@ -7,11 +7,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import from_url  # type: ignore[reportUnknownVariableType]
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from app.api.router import api_router
 from app.config import get_settings
 from app.db.session import create_engine, get_session_factory
 from app.logging_config.setup import configure_logging, get_logger
+from app.rate_limit import limiter
 from app.vectorstore.qdrant_client import init_collection
 
 logger = get_logger(__name__)
@@ -66,6 +69,13 @@ def create_app() -> FastAPI:
         description="RAG system with real-time PII masking and RBAC",
         version="0.1.0",
         lifespan=lifespan,
+    )
+
+    # Register rate limiter and its specific exception handler
+    app.state.limiter = limiter
+    app.add_exception_handler(
+        RateLimitExceeded,
+        _rate_limit_exceeded_handler,  # type: ignore[reportArgumentType]
     )
 
     app.include_router(api_router)

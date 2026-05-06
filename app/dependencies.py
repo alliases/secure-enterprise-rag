@@ -6,6 +6,8 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,7 @@ from app.db.models import User
 
 # Defines the scheme for Swagger UI integration and token extraction
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+limiter = Limiter(key_func=get_remote_address)
 
 
 async def get_redis(request: Request) -> Redis:

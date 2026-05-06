@@ -12,11 +12,13 @@ from app.auth.jwt_handler import create_access_token
 from app.auth.security import verify_password
 from app.db.models import AuditLog, User
 from app.dependencies import get_db_session
+from app.rate_limit import limiter
 
 router = APIRouter()
 
 
 @router.post("/login")
+@limiter.limit("5/minute")  # type: ignore[reportUntypedFunctionDecorator, reportUnknownMemberType]
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),

@@ -14,6 +14,7 @@ from app.db.models import AuditLog
 from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
 from app.graph.graph_builder import rag_graph
 from app.logging_config.setup import get_logger
+from app.rate_limit import limiter
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -27,6 +28,7 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/", status_code=status.HTTP_200_OK)
+@limiter.limit("30/minute")  # type: ignore[reportUntypedFunctionDecorator, reportUnknownMemberType]
 async def ask_question(
     request: Request,
     payload: QueryRequest,

@@ -1,17 +1,41 @@
-# Security & Environments
+# === Security & Environments ===
 .env
 .venv/
 venv/
 env/
 
+# === OS Specific ===
 # macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 
-# IDEs
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+Desktop.ini
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# === IDEs & Editors ===
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Python
+# === Python ===
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,25 +44,25 @@ build/
 dist/
 *.egg-info/
 
-# Testing & Coverage
+# === Testing & Coverage ===
 .pytest_cache/
 .coverage
 htmlcov/
 coverage.xml
 
-# Linting & Formatting
+# === Linting & Formatting ===
 .ruff_cache/
 .mypy_cache/
 .pyright_cache/
 
-# Logs
+# === Logs ===
 logs/
 *.log
 
-# Databases
+# === Databases ===
 *.sqlite3
 
-
+# === Project Specific ===
 collect_context.py
 collect_context.pyw
 project_context.txt
