@@ -77,7 +77,7 @@ async def test_store_retrieve_delete_mappings(mock_redis: Redis) -> None:
 
 @pytest.mark.asyncio
 async def test_demask_authorized_user(
-    mock_redis: Redis, hr_manager_user: dict[str, str]
+    mock_redis: Redis, hr_user: dict[str, str]
 ) -> None:
     """Verifies that an HR Manager can view unmasked data for their department."""
     doc_id = "doc-456"
@@ -88,12 +88,12 @@ async def test_demask_authorized_user(
     demasked = await demask_response(
         response_text=masked_response,
         document_ids=[doc_id],
-        target_department_id="dept_hr_1",
+        target_department_id="hr_dept",  # Matches the hr_user fixture
         redis=mock_redis,
-        user=hr_manager_user,
+        user=hr_user,
     )
 
-    assert demask_response != masked_response
+    assert demasked != masked_response  # Fixed variable name
     assert demasked == "The salary of Bob is high."
 
 
