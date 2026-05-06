@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     redis_encryption_key: SecretStr
 
+    # Security Headers & CORS
+    allowed_origins: list[str] = ["http://localhost:3000"]
+
     # ML Models
     embedding_model: str = "text-embedding-3-small"
     local_model_revision: str | None = (

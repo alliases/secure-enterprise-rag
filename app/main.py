@@ -5,10 +5,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import from_url  # type: ignore[reportUnknownVariableType]
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.api.router import api_router
 from app.config import get_settings
@@ -18,6 +22,25 @@ from app.rate_limit import limiter
 from app.vectorstore.qdrant_client import init_collection
 
 logger = get_logger(__name__)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Injects standard HTTP security headers into every response.
+    Protects against Clickjacking, MIME-sniffing, and cross-site scripting (XSS).
+    """
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
 
 
 @asynccontextmanager
@@ -64,11 +87,23 @@ def create_app() -> FastAPI:
     """
     Application factory method.
     """
+    settings = get_settings()
+
     app = FastAPI(
         title="Secure Enterprise RAG",
         description="RAG system with real-time PII masking and RBAC",
         version="0.1.0",
         lifespan=lifespan,
+    )
+
+    # Register Middlewares (Order matters: outermost first)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
     )
 
     # Register rate limiter and its specific exception handler
