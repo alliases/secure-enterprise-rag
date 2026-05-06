@@ -3,9 +3,10 @@ File: tests/test_dependencies.py
 """
 
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from typing import Final
-from unittest.mock import MagicMock
+from typing import Any, Final
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException, Request
@@ -14,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt_handler import create_access_token
 from app.config import get_settings
-from app.db.models import User
-from app.dependencies import get_current_user, get_qdrant, get_redis
+from app.db.models import Role, User  # Додано імпорт Role
+from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
 
 # Define a constant for dummy test hashes to avoid Ruff S106 & S105 false positives
 MOCK_HASHED_PASSWORD: Final[str] = "dummy_hashed_password_for_testing"
@@ -24,6 +25,10 @@ MOCK_HASHED_PASSWORD: Final[str] = "dummy_hashed_password_for_testing"
 @pytest.mark.asyncio
 async def test_get_current_user_valid_token(db_session: AsyncSession) -> None:
     """Happy path: Valid token and active user returns user payload."""
+    # 1. Insert required foreign key dependency (Role)
+    test_role = Role(name="hr_manager", permissions=["view_unmasked"])
+    db_session.add(test_role)
+
     user_id = uuid.uuid4()
     test_user = User(
         id=user_id,
@@ -49,6 +54,10 @@ async def test_get_current_user_valid_token(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_get_current_user_inactive_user(db_session: AsyncSession) -> None:
     """Security check: Inactive user in DB should trigger 403 Forbidden."""
+    # 1. Insert required foreign key dependency (Role)
+    test_role = Role(name="viewer", permissions=["view_masked"])
+    db_session.add(test_role)
+
     user_id = uuid.uuid4()
     test_user = User(
         id=user_id,
@@ -115,3 +124,67 @@ async def test_state_dependencies() -> None:
 
     assert redis_result == "mock_redis_instance"
     assert qdrant_result == "mock_qdrant_instance"
+
+
+@pytest.mark.asyncio
+async def test_get_db_session_success() -> None:
+    """Verifies that the database session commits successfully on clean execution."""
+    mock_request = MagicMock(spec=Request)
+    mock_session = AsyncMock()
+
+    # Створюємо явний клас-імітатор асинхронного контекстного менеджера
+    class DummySessionFactory:
+        def __call__(self) -> "DummySessionFactory":
+            return self
+
+        async def __aenter__(self) -> AsyncMock:
+            return mock_session
+
+        async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+            pass
+
+    mock_request.app.state.session_factory = DummySessionFactory()
+
+    generator: AsyncGenerator[AsyncSession] = get_db_session(mock_request)
+
+    # Start generator (yields session)
+    session = await anext(generator)
+    assert session == mock_session
+
+    # Finish generator (triggers try/commit block)
+    with pytest.raises(StopAsyncIteration):
+        await anext(generator)
+
+    mock_session.commit.assert_awaited_once()
+    mock_session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_db_session_exception_rollback() -> None:
+    """Verifies that the database session rolls back if an exception occurs in the route."""
+    mock_request = MagicMock(spec=Request)
+    mock_session = AsyncMock()
+
+    class DummySessionFactory:
+        def __call__(self) -> "DummySessionFactory":
+            return self
+
+        async def __aenter__(self) -> AsyncMock:
+            return mock_session
+
+        async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+            pass
+
+    mock_request.app.state.session_factory = DummySessionFactory()
+
+    generator: AsyncGenerator[AsyncSession] = get_db_session(mock_request)
+
+    # Start generator
+    await anext(generator)
+
+    # Simulate an exception raised during the request lifecycle (inside endpoint)
+    with pytest.raises(ValueError, match="Endpoint error"):
+        await generator.athrow(ValueError("Endpoint error"))
+
+    mock_session.rollback.assert_awaited_once()
+    mock_session.commit.assert_not_awaited()
