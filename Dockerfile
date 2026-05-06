@@ -17,6 +17,9 @@ RUN poetry config virtualenvs.create false \
 # Stage 2: Runtime phase
 FROM python:3.13-slim
 
+# Install libmagic for python-magic file validation
+RUN apt-get update && apt-get install -y libmagic1 && rm -rf /var/lib/apt/lists/*
+
 # Create a non-root user
 RUN useradd -m -r appuser
 

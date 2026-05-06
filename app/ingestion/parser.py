@@ -85,6 +85,17 @@ def parse_docx(file_path: Path) -> str:
     return "\n\n".join(text_blocks)
 
 
+def parse_text(file_path: Path) -> str:
+    """
+    Extracts raw text from plain text formats (.txt, .md, .csv).
+    """
+    try:
+        return file_path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.error("Text parsing failed", file_path=str(file_path), error=str(e))
+        raise ParseError(f"Failed to parse text document: {e!s}") from e
+
+
 def parse_document(file_path: Path, file_name: str, file_type: str) -> ParsedDocument:
     """
     Main entry point for document parsing.
@@ -102,6 +113,9 @@ def parse_document(file_path: Path, file_name: str, file_type: str) -> ParsedDoc
     elif file_type_lower in ["docx", "doc"]:
         extracted_text = parse_docx(file_path)
         # DOCX lacks a strict pagination concept without rendering engines
+        page_count = 1
+    elif file_type_lower in ["txt", "md", "csv"]:
+        extracted_text = parse_text(file_path)
         page_count = 1
     else:
         logger.warning("Unsupported file type attempted", file_type=file_type)
