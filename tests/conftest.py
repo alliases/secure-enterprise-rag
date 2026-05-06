@@ -1,55 +1,116 @@
-# File: tests/conftest.py
-# Purpose: Global pytest fixtures for dependency injection in tests.
+"""
+File: tests/conftest.py
+Task: 2.7 - Pytest fixtures and mocks
+"""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
-import fakeredis.aioredis  # type: ignore[import-untyped]
+import fakeredis.aioredis
 import pytest
 import pytest_asyncio
-from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.auth.jwt_handler import create_access_token
+from app.db.models import Base
 
 
 @pytest_asyncio.fixture
-async def mock_redis() -> AsyncGenerator[Redis]:
+async def db_session() -> AsyncGenerator[AsyncSession]:
     """
-    Provides an isolated, in-memory fake Redis instance for each test.
-    Simulates async Redis behavior without requiring a real database connection.
+    Creates a fresh SQLite in-memory database for each test.
+    Ensures complete isolation of database states between tests.
     """
-    server = fakeredis.FakeServer()
-    # Decode responses=False aligns with our app.main implementation
-    client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 
-    yield client
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-    await client.aclose()
+    session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    async with session_factory() as session:
+        yield session
+        await session.rollback()
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def mock_redis() -> AsyncGenerator[fakeredis.aioredis.FakeRedis]:
+    """
+    Provides a fully functional in-memory Redis mock.
+    """
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    yield redis
+    await redis.aclose()
 
 
 @pytest.fixture
-def hr_manager_user() -> dict[str, Any]:
-    """Fixture for an authorized HR Manager."""
+def mock_qdrant() -> AsyncMock:
+    """
+    Mocks the AsyncQdrantClient to prevent network calls to the vector DB.
+    """
+    client = AsyncMock()
+    client.collection_exists.return_value = True
+    client.upsert.return_value = AsyncMock(status="completed")
+    return client
+
+
+@pytest.fixture
+def mock_openai() -> Generator[AsyncMock]:
+    """
+    Patches the AsyncOpenAI client globally to prevent real API billing charges.
+    Returns mocked responses for chat completions and embeddings.
+    """
+    with patch("app.llm.provider.AsyncOpenAI") as mock:
+        mock_client = AsyncMock()
+
+        # Mock ChatCompletion
+        mock_message = AsyncMock(
+            content="Mocked LLM response generated strictly from context."
+        )
+        mock_choice = AsyncMock(message=mock_message)
+        mock_client.chat.completions.create.return_value.choices = [mock_choice]
+
+        # Mock Embeddings (OpenAI 1536 dims)
+        mock_data = AsyncMock(embedding=[0.1] * 1536)
+        mock_client.embeddings.create.return_value.data = [mock_data]
+
+        mock.return_value = mock_client
+        yield mock_client
+
+
+@pytest.fixture
+def hr_user() -> dict[str, str]:
     return {
-        "user_id": "11111111-1111-1111-1111-111111111111",
+        "user_id": "00000000-0000-0000-0000-000000000001",
         "role": "hr_manager",
-        "department_id": "dept_hr_1",
+        "department_id": "hr_dept",
     }
 
 
 @pytest.fixture
-def viewer_user() -> dict[str, Any]:
-    """Fixture for an unauthorized Viewer."""
+def viewer_user() -> dict[str, str]:
     return {
-        "user_id": "22222222-2222-2222-2222-222222222222",
+        "user_id": "00000000-0000-0000-0000-000000000002",
         "role": "viewer",
-        "department_id": "dept_hr_1",
+        "department_id": "hr_dept",
     }
 
 
 @pytest.fixture
-def admin_user() -> dict[str, Any]:
-    """Fixture for an Admin with global access."""
-    return {
-        "user_id": "33333333-3333-3333-3333-333333333333",
-        "role": "admin",
-        "department_id": "dept_it_1",
-    }
+def hr_token(hr_user: dict[str, str]) -> str:
+    """
+    Generates a valid JWT for the HR Manager fixture.
+    """
+    return create_access_token(
+        data={
+            "sub": hr_user["user_id"],
+            "role": hr_user["role"],
+            "department_id": hr_user["department_id"],
+        }
+    )
