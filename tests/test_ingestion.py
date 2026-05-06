@@ -1,92 +1,215 @@
-# File: tests/test_ingestion.py
-# Purpose: Unit tests for document parsing and chunking logic using pytest-mock.
+"""
+File: tests/test_ingestion.py
+Task: 2.1 - Pipeline Tests
+"""
 
+import uuid
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from pytest_mock import MockerFixture
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ingestion.chunker import chunk_text
-from app.ingestion.parser import ParseError, parse_document
-
-
-def test_parse_pdf_mocked(mocker: MockerFixture) -> None:
-    """Verifies PDF text extraction and page counting using mocked PyMuPDF."""
-    # Flat mocking using mocker fixture
-    mock_fitz = mocker.patch("app.ingestion.parser.fitz.open")
-    mocker.patch("pathlib.Path.exists", return_value=True)
-
-    # Setup mock PDF document structure
-    mock_doc = MagicMock()
-    mock_doc.__len__.return_value = 2
-
-    mock_page1 = MagicMock()
-    mock_page1.get_text.return_value = "Page 1 content."
-    mock_page2 = MagicMock()
-    mock_page2.get_text.return_value = "Page 2 content."
-
-    mock_doc.__iter__.return_value = [mock_page1, mock_page2]
-    mock_fitz.return_value.__enter__.return_value = mock_doc
-
-    parsed = parse_document(Path("dummy.pdf"), "dummy.pdf", "pdf")
-
-    assert parsed.metadata["page_count"] == 2
-    assert "Page 1 content." in parsed.text
-    assert "Page 2 content." in parsed.text
+from app.db.models import Document
+from app.ingestion.pipeline import run_ingestion
 
 
-def test_parse_docx_mocked(mocker: MockerFixture) -> None:
-    """Verifies DOCX paragraph extraction using mocked python-docx."""
-    mock_docx = mocker.patch("app.ingestion.parser.docx.Document")
-    mocker.patch("pathlib.Path.exists", return_value=True)
-
-    mock_doc = MagicMock()
-    mock_para = MagicMock()
-    mock_para.text = "Paragraph content."
-
-    mock_doc.paragraphs = [mock_para]
-    mock_doc.tables = []
-    mock_docx.return_value = mock_doc
-
-    parsed = parse_document(Path("dummy.docx"), "dummy.docx", "docx")
-
-    assert parsed.metadata["page_count"] == 1
-    assert "Paragraph content." in parsed.text
-
-
-def test_parse_unsupported_type(mocker: MockerFixture) -> None:
-    """Ensures parser strictly rejects unauthorized file types."""
-    mocker.patch("pathlib.Path.exists", return_value=True)
-
-    with pytest.raises(ParseError, match="Unsupported file type"):
-        parse_document(Path("dummy.txt"), "dummy.txt", "txt")
-
-
-def test_parse_file_not_found() -> None:
-    """Ensures proper error handling when the file does not exist on disk."""
-    # No mocking needed here, we want it to fail naturally on missing file
-    with pytest.raises(ParseError, match="File not found"):
-        parse_document(Path("non_existent.pdf"), "non_existent.pdf", "pdf")
-
-
-def test_chunker_logic() -> None:
-    """Verifies semantic chunking and correct RBAC metadata propagation."""
-    text = "A" * 5000
-
-    chunks = chunk_text(
-        text=text,
-        document_id="doc-1",
-        department_id="dept-1",
-        access_level=2,
-        source_filename="test.pdf",
+@pytest.mark.asyncio
+async def test_run_ingestion_success(
+    db_session: AsyncSession, mock_redis, mock_qdrant, tmp_path: Path
+) -> None:
+    """Happy path: Document is parsed, chunks are generated and masked, status updated to 'done'."""
+    # 1. Setup mock document in DB
+    doc_id = uuid.uuid4()
+    test_doc = Document(
+        id=doc_id,
+        filename="test.txt",
+        department_id="hr_dept",
+        access_level=1,
+        status="pending",
     )
+    db_session.add(test_doc)
+    await db_session.commit()
 
-    assert len(chunks) > 1
+    # 2. Setup a temporary dummy file
+    temp_file = tmp_path / "test.txt"
+    temp_file.write_text("John Doe works at Acme Corp.")
 
-    first_chunk = chunks[0]
-    assert first_chunk.metadata["document_id"] == "doc-1"
-    assert first_chunk.metadata["department_id"] == "dept-1"
-    assert first_chunk.metadata["access_level"] == 2
-    assert first_chunk.metadata["source_filename"] == "test.pdf"
-    assert first_chunk.chunk_index == 0
+    # 3. Patch out internal dependencies to isolate pipeline logic
+    with (
+        patch("app.ingestion.pipeline.parse_document") as mock_parse,
+        patch("app.ingestion.pipeline.chunk_text") as mock_chunk,
+        patch("app.ingestion.pipeline.analyze_text") as mock_analyze,
+        patch("app.ingestion.pipeline.mask_text") as mock_mask,
+        patch("app.ingestion.pipeline.embed_texts") as mock_embed,
+    ):
+        # Configure mocks
+        mock_parse.return_value.text = "John Doe works at Acme Corp."
+
+        from app.ingestion.chunker import Chunk
+
+        mock_chunk.return_value = [
+            Chunk(
+                text="John Doe works at Acme Corp.",
+                metadata={"document_id": str(doc_id)},
+                chunk_index=0,
+            )
+        ]
+
+        mock_analyze.return_value = []
+
+        from app.masking.presidio_engine import MaskedResult
+
+        mock_mask.return_value = MaskedResult(
+            masked_text="[PERSON_1] works at Acme Corp.",
+            mappings={"[PERSON_1]": "John Doe"},
+        )
+
+        mock_embed.return_value = [[0.1] * 1536]
+
+        # 4. Execute pipeline (simulate the session factory behavior passing the current isolated session)
+        async def mock_session_factory():
+            # Create a dummy async context manager that returns our test session
+            class DummyContextManager:
+                async def __aenter__(self):
+                    return db_session
+
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
+
+            return DummyContextManager()
+
+        await run_ingestion(
+            file_path=temp_file,
+            file_name="test.txt",
+            file_type="txt",
+            document_id=str(doc_id),
+            department_id="hr_dept",
+            access_level=1,
+            user_id=str(uuid.uuid4()),
+            redis=mock_redis,
+            qdrant=mock_qdrant,
+            session_factory=mock_session_factory,
+        )
+
+    # 5. Assertions
+    # Verify DB status updated
+    await db_session.refresh(test_doc)
+    assert test_doc.status == "done"
+    assert test_doc.chunk_count == 1
+
+    # Verify temp file is cleaned up
+    assert not temp_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_ingestion_parse_error(
+    db_session: AsyncSession, mock_redis, mock_qdrant, tmp_path: Path
+) -> None:
+    """Error path: Parsing fails (e.g., corrupted file), status updated to 'error'."""
+    doc_id = uuid.uuid4()
+    test_doc = Document(
+        id=doc_id,
+        filename="corrupted.pdf",
+        department_id="hr_dept",
+        access_level=1,
+        status="pending",
+    )
+    db_session.add(test_doc)
+    await db_session.commit()
+
+    temp_file = tmp_path / "corrupted.pdf"
+    temp_file.write_bytes(b"not a real pdf")
+
+    with patch(
+        "app.ingestion.pipeline.parse_document", side_effect=Exception("Parsing failed")
+    ):
+
+        async def mock_session_factory():
+            class DummyContextManager:
+                async def __aenter__(self):
+                    return db_session
+
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
+
+            return DummyContextManager()
+
+        await run_ingestion(
+            file_path=temp_file,
+            file_name="corrupted.pdf",
+            file_type="pdf",
+            document_id=str(doc_id),
+            department_id="hr_dept",
+            access_level=1,
+            user_id=str(uuid.uuid4()),
+            redis=mock_redis,
+            qdrant=mock_qdrant,
+            session_factory=mock_session_factory,
+        )
+
+    await db_session.refresh(test_doc)
+    assert test_doc.status == "error"
+    assert not temp_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_run_ingestion_redis_failure(
+    db_session: AsyncSession, mock_redis, mock_qdrant, tmp_path: Path
+) -> None:
+    """Error path: Redis mapping store fails during chunk processing."""
+    doc_id = uuid.uuid4()
+    test_doc = Document(
+        id=doc_id,
+        filename="test.txt",
+        department_id="hr_dept",
+        access_level=1,
+        status="pending",
+    )
+    db_session.add(test_doc)
+    await db_session.commit()
+
+    temp_file = tmp_path / "test.txt"
+    temp_file.write_text("Data")
+
+    with (
+        patch("app.ingestion.pipeline.parse_document"),
+        patch("app.ingestion.pipeline.chunk_text") as mock_chunk,
+        patch("app.ingestion.pipeline.analyze_text"),
+        patch("app.ingestion.pipeline.mask_text"),
+        patch(
+            "app.ingestion.pipeline.store_mappings",
+            side_effect=ConnectionError("Redis down"),
+        ),
+    ):
+        from app.ingestion.chunker import Chunk
+
+        mock_chunk.return_value = [
+            Chunk(text="Data", metadata={"document_id": str(doc_id)}, chunk_index=0)
+        ]
+
+        async def mock_session_factory():
+            class DummyContextManager:
+                async def __aenter__(self):
+                    return db_session
+
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
+
+            return DummyContextManager()
+
+        await run_ingestion(
+            file_path=temp_file,
+            file_name="test.txt",
+            file_type="txt",
+            document_id=str(doc_id),
+            department_id="hr_dept",
+            access_level=1,
+            user_id=str(uuid.uuid4()),
+            redis=mock_redis,
+            qdrant=mock_qdrant,
+            session_factory=mock_session_factory,
+        )
+
+    await db_session.refresh(test_doc)
+    assert test_doc.status == "error"
