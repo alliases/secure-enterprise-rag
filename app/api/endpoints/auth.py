@@ -48,11 +48,23 @@ async def login(
     Complies with OAuth2 specification (username = email).
     """
     stmt = select(User).where(User.email == form_data.username)
-    result = await db.execute(stmt)
-    user = result.scalar_one_or_none()
+    user = await db.scalar(stmt)
 
     if not user or not verify_password(form_data.password, user.hashed_password):
-        # Prevent user enumeration by logging the failure but keeping the error generic
+        # Record failed login attempt for compliance (SOC2/ISO27001)
+        client_ip = request.client.host if request.client else "unknown"
+        audit_entry = AuditLog(
+            user_id=user.id if user else None,
+            action="login_failed",
+            details={
+                "email_attempted": form_data.username,
+                "reason": "invalid_credentials",
+            },
+            ip_address=client_ip,
+        )
+        db.add(audit_entry)
+        await db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

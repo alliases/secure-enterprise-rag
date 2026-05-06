@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,8 +23,17 @@ router = APIRouter()
 class QueryRequest(BaseModel):
     """Payload schema for incoming RAG queries."""
 
-    question: str
-    filters: dict[str, Any] = {}
+    question: str = Field(..., min_length=3, max_length=2000)
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("question")
+    @classmethod
+    def sanitize_question(cls, v: str) -> str:
+        """Removes null bytes and strips whitespace to prevent basic prompt injections."""
+        v = v.replace("\x00", "").strip()
+        if not v:
+            raise ValueError("Question cannot be empty after sanitization")
+        return v
 
 
 @router.post("/", status_code=status.HTTP_200_OK)
