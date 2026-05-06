@@ -3,8 +3,13 @@ File: tests/conftest.py
 Task: 2.7 - Pytest fixtures and mocks
 """
 
+import os
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
+
+from cryptography.fernet import Fernet
+
+os.environ["REDIS_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis

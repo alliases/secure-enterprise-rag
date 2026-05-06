@@ -5,30 +5,46 @@ from collections.abc import AsyncIterator
 from datetime import timedelta
 from typing import cast
 
+from cryptography.fernet import Fernet
 from redis.asyncio import Redis
+
+from app.config import get_settings
+from app.logging_config.setup import get_logger
+
+logger = get_logger(__name__)
 
 # Constants
 TTL_DAYS = 30
 PREFIX = "pii"
 
 
+def _get_cipher() -> Fernet:
+    """Instantiates the Fernet symmetric encryption cipher."""
+    settings = get_settings()
+    key = settings.redis_encryption_key.get_secret_value().encode("utf-8")
+    return Fernet(key)
+
+
 async def store_mappings(
     redis: Redis, document_id: str, mappings: dict[str, str]
 ) -> int:
     """
-    Stores PII mappings in Redis using a pipeline for atomic execution and performance.
+    Encrypts and stores PII mappings in Redis using a pipeline.
     Keys are formatted as: pii:{document_id}:{token}
     """
     if not mappings:
         return 0
 
-    # Using a pipeline to minimize network round-trips
+    cipher = _get_cipher()
+
     async with redis.pipeline(transaction=True) as pipe:
         for token, original_value in mappings.items():
             key = f"{PREFIX}:{document_id}:{token}"
-            pipe.setex(name=key, time=timedelta(days=TTL_DAYS), value=original_value)
+            encrypted_value = cipher.encrypt(original_value.encode("utf-8")).decode(
+                "utf-8"
+            )
+            pipe.setex(name=key, time=timedelta(days=TTL_DAYS), value=encrypted_value)
 
-        # Execute all commands in the pipeline atomically
         results = await pipe.execute()
 
     return len(results)
@@ -45,16 +61,21 @@ async def retrieve_mappings(redis: Redis, document_id: str) -> dict[str, str]:
     # Cast scan_iter to provide explicit types and ignore third-party stub incomplete types
     scan_iterator = cast(AsyncIterator[bytes], redis.scan_iter(match=match_pattern))  # type: ignore[reportUnknownMemberType]
 
+    cipher = _get_cipher()
+
     async for key_bytes in scan_iterator:
         key = key_bytes.decode("utf-8")
 
-        # Cast get result to resolve Unknown type
         value_bytes = cast(bytes | None, await redis.get(key))
 
         if value_bytes:
-            # Extract the token part from the key (pii:doc_id:token)
             token = key.split(":")[-1]
-            mappings[token] = value_bytes.decode("utf-8")
+            try:
+                decrypted_value = cipher.decrypt(value_bytes).decode("utf-8")
+                mappings[token] = decrypted_value
+            except Exception as e:
+                logger.error("Failed to decrypt PII mapping", key=key, error=str(e))
+                continue
 
     return mappings
 

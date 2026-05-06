@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr
     jwt_secret: SecretStr
     jwt_algorithm: str = "HS256"
+    redis_encryption_key: SecretStr
 
     # ML Models
     embedding_model: str = "text-embedding-3-small"
