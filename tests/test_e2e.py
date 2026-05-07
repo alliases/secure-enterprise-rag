@@ -15,6 +15,7 @@ from app.auth.security import get_password_hash
 from app.db.models import Document, Role, User
 from app.dependencies import get_db_session, get_qdrant, get_redis
 from app.main import app
+from app.rate_limit import limiter
 
 # Valid PDF magic bytes to bypass magic validation
 PDF_MAGIC_BYTES = (
@@ -27,6 +28,7 @@ async def e2e_client(
     db_session: AsyncSession, mock_redis, mock_qdrant
 ) -> AsyncGenerator[AsyncClient]:
     """Test client overriding the DB session and injecting external API mocks into app state."""
+    limiter.enabled = False
     # 1. Override FastAPI Depends() injections
     app.dependency_overrides[get_db_session] = lambda: db_session
     app.dependency_overrides[get_redis] = lambda: mock_redis
@@ -52,6 +54,7 @@ async def e2e_client(
         yield ac
 
     app.dependency_overrides.clear()
+    limiter.enabled = True
 
 
 @pytest_asyncio.fixture
@@ -190,6 +193,7 @@ async def test_e2e_viewer_gets_masked_response(
             "password": setup_e2e_users["password"],
         },
     )
+    assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
     token = login_resp.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 

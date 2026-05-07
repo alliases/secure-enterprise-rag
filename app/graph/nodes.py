@@ -69,7 +69,6 @@ async def retriever_node(state: RAGState, config: RunnableConfig) -> dict[str, A
         department_id=department_id,
     )
 
-    return {"retrieved_chunks": retrieved_chunks}
     document_ids = list(
         {str(chunk.metadata.get("document_id", "")) for chunk in retrieved_chunks}
     )

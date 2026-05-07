@@ -122,6 +122,7 @@ async def run_ingestion(
                 trace=traceback.format_exc(),
             )
             INGESTION_TOTAL.labels(status="error").inc()
+            await db_session.rollback()
             # Fallback status update
             doc = await db_session.get(Document, uuid.UUID(document_id))
             if doc:

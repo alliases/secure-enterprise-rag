@@ -70,3 +70,6 @@ collect_context.pyw
 project_context.txt
 collect_tests_context.py
 tests_context.txt
+
+# === Uploads ===
+temp_uploads/
