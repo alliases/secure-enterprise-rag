@@ -1,18 +1,15 @@
 # File: app/auth/rbac.py
-# Purpose: Core Role-Based Access Control logic for the application.
-
+from collections.abc import Callable
 from typing import Any
 
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
+
+from app.dependencies import get_current_user
 
 
 def check_permission(
     user: dict[str, Any], target_department_id: str, action: str
 ) -> bool:
-    """
-    Evaluates if a user has the right to perform a specific action
-    on data belonging to a target department.
-    """
     role = user.get("role")
     user_dept = user.get("department_id")
 
@@ -25,13 +22,13 @@ def check_permission(
     return action == "view_masked"
 
 
-def require_role(allowed_roles: list[str]) -> Any:
-    """
-    FastAPI dependency factory to enforce endpoint-level role access.
-    Usage: Depends(require_role(["admin", "hr_manager"]))
-    """
-
-    def role_checker(current_user: dict[str, Any]) -> dict[str, Any]:
+def require_role(
+    allowed_roles: list[str],
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    # КРИТИЧНО: Depends(get_current_user) має бути тут
+    def role_checker(
+        current_user: dict[str, Any] = Depends(get_current_user),
+    ) -> dict[str, Any]:
         if current_user.get("role") not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

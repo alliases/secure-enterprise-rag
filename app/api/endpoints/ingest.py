@@ -22,6 +22,7 @@ from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.rbac import require_role
 from app.db.models import Document
 from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
 from app.ingestion.pipeline import run_ingestion
@@ -52,7 +53,7 @@ async def upload_document(
     department_id: str = Form(...),
     access_level: int = Form(...),
     file: UploadFile = File(...),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(require_role(["hr_manager", "admin"])),
     db: AsyncSession = Depends(get_db_session),
     redis: Redis = Depends(get_redis),
     qdrant: AsyncQdrantClient = Depends(get_qdrant),

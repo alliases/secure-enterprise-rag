@@ -8,6 +8,7 @@ from collections.abc import AsyncGenerator, Generator
 from typing import Any
 
 from cryptography.fernet import Fernet
+from httpx import ASGITransport, AsyncClient
 
 os.environ["REDIS_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 from unittest.mock import AsyncMock, patch
@@ -20,6 +21,8 @@ from testcontainers.postgres import PostgresContainer  # type: ignore[import-unt
 
 from app.auth.jwt_handler import create_access_token
 from app.db.models import Base
+from app.dependencies import get_db_session, get_qdrant, get_redis
+from app.main import create_app
 
 
 @pytest.fixture(scope="session")
@@ -138,3 +141,32 @@ def hr_token(hr_user: dict[str, str]) -> str:
             "department_id": hr_user["department_id"],
         }
     )
+
+
+@pytest_asyncio.fixture
+async def async_client(
+    db_session: AsyncSession, mock_redis: Any, mock_qdrant: Any
+) -> AsyncGenerator[AsyncClient]:
+    """
+    Test client for FastAPI that overrides dependencies to use
+    our test database, fakeredis, and mock qdrant.
+    """
+    app = create_app()
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession]:
+        yield db_session
+
+    async def override_get_redis() -> Any:
+        return mock_redis
+
+    async def override_get_qdrant() -> Any:
+        return mock_qdrant
+
+    app.dependency_overrides[get_db_session] = override_get_db
+    app.dependency_overrides[get_redis] = override_get_redis
+    app.dependency_overrides[get_qdrant] = override_get_qdrant
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
