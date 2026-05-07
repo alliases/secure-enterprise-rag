@@ -54,6 +54,7 @@ python-magic = "^0.4.27"
 cryptography = "^48.0.0"
 prometheus-fastapi-instrumentator = "^7.1.0"
 prometheus-client = "^0.25.0"
+asgi-correlation-id = "^4.3.4"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

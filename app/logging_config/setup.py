@@ -7,6 +7,7 @@ from collections.abc import MutableMapping
 from typing import Any
 
 import structlog
+from asgi_correlation_id import correlation_id
 
 from app.config import get_settings
 
@@ -50,6 +51,16 @@ def pii_sanitizer(
     return event_dict
 
 
+def add_correlation_id(
+    logger: logging.Logger, name: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Injects the Trace ID into the log entry if it exists in the current context."""
+    request_id = correlation_id.get()
+    if request_id:
+        event_dict["request_id"] = request_id
+    return event_dict
+
+
 def configure_logging() -> None:
     """
     Initializes global structlog configuration.
@@ -62,6 +73,7 @@ def configure_logging() -> None:
             structlog.stdlib.add_log_level,
             structlog.stdlib.add_logger_name,
             structlog.processors.TimeStamper(fmt="iso"),
+            add_correlation_id,
             pii_sanitizer,
             structlog.processors.JSONRenderer(),
         ],

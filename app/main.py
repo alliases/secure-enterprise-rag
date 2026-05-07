@@ -4,6 +4,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from asgi_correlation_id import CorrelationIdMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     Instrumentator().instrument(app).expose(app, tags=["Monitoring"])
 
     # Register Middlewares (Order matters: outermost first)
+    app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
