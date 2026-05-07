@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from app.masking.regex_patterns import get_custom_recognizers
+from app.metrics import PII_ENTITIES_TOTAL
 
 
 @dataclass
@@ -69,7 +70,7 @@ def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResu
     for result in sorted_results:
         entity_type = result.entity_type
         original_value = text[result.start : result.end]
-
+        PII_ENTITIES_TOTAL.labels(entity_type=entity_type).inc()
         # Increment counter to generate unique tokens per entity type (e.g., PERSON_1, PERSON_2)
         count = entity_counters.get(entity_type, 0) + 1
         entity_counters[entity_type] = count

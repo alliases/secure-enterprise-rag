@@ -14,6 +14,7 @@ from app.db.models import AuditLog
 from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
 from app.graph.graph_builder import rag_graph
 from app.logging_config.setup import get_logger
+from app.metrics import RAG_QUERY_DURATION
 from app.rate_limit import limiter
 
 logger = get_logger(__name__)
@@ -65,7 +66,9 @@ async def ask_question(
     }
 
     try:
-        final_state = await rag_graph.ainvoke(initial_state, config=config)
+        # Measure latency of the LangGraph execution
+        with RAG_QUERY_DURATION.time():
+            final_state = await rag_graph.ainvoke(initial_state, config=config)
     except Exception as e:
         logger.error("LangGraph execution failed", error=str(e))
         raise HTTPException(

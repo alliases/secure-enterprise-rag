@@ -17,6 +17,7 @@ from app.ingestion.parser import parse_document
 from app.logging_config.setup import get_logger
 from app.masking.mapping_store import store_mappings
 from app.masking.presidio_engine import analyze_text, mask_text
+from app.metrics import INGESTION_TOTAL
 from app.vectorstore.embedder import embed_texts
 from app.vectorstore.qdrant_client import upsert_chunks
 
@@ -108,6 +109,7 @@ async def run_ingestion(
                 ip_address="internal_background_task",
             )
             db_session.add(audit_entry)
+            INGESTION_TOTAL.labels(status="done").inc()
             await db_session.commit()
 
             logger.info("Ingestion completed successfully", document_id=document_id)
@@ -119,6 +121,7 @@ async def run_ingestion(
                 error=str(e),
                 trace=traceback.format_exc(),
             )
+            INGESTION_TOTAL.labels(status="error").inc()
             # Fallback status update
             doc = await db_session.get(Document, uuid.UUID(document_id))
             if doc:

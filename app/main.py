@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import from_url  # type: ignore[reportUnknownVariableType]
 from slowapi import _rate_limit_exceeded_handler
@@ -95,6 +96,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Expose standard HTTP metrics via Prometheus
+    Instrumentator().instrument(app).expose(app, tags=["Monitoring"])
 
     # Register Middlewares (Order matters: outermost first)
     app.add_middleware(SecurityHeadersMiddleware)
