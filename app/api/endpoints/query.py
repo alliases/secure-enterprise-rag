@@ -65,12 +65,30 @@ async def ask_question(
         }
     }
 
+    logger.info(
+        "Executing RAG query",
+        user_id=current_user["user_id"],
+        department_id=current_user["department_id"],
+        has_filters=bool(payload.filters),
+    )
+
     try:
         # Measure latency of the LangGraph execution
         with RAG_QUERY_DURATION.time():
             final_state = await rag_graph.ainvoke(initial_state, config=config)
+
+        logger.info(
+            "RAG query executed successfully",
+            user_id=current_user["user_id"],
+            retrieved_chunks=len(final_state.get("retrieved_chunks", [])),
+            error_detected=final_state.get("error") is not None,
+        )
     except Exception as e:
-        logger.error("LangGraph execution failed", error=str(e))
+        logger.error(
+            "LangGraph execution failed",
+            user_id=current_user["user_id"],
+            error=str(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal processing error during query execution",

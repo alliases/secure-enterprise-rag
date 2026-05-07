@@ -92,6 +92,16 @@ async def upload_document(
         )
 
     document_id = uuid.uuid4()
+
+    logger.info(
+        "Document upload validated and ingestion scheduled",
+        document_id=str(document_id),
+        filename=file.filename,
+        file_size_bytes=len(content),
+        mime_type=mime_type,
+        department_id=department_id,
+        user_id=current_user["user_id"],
+    )
     temp_file_path = UPLOAD_DIR / f"{document_id}.{file_ext}"
 
     try:

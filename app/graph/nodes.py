@@ -63,7 +63,13 @@ async def retriever_node(state: RAGState, config: RunnableConfig) -> dict[str, A
         qdrant=qdrant,
         top_k=5,
     )
+    logger.info(
+        "Context retrieval complete",
+        chunk_count=len(retrieved_chunks),
+        department_id=department_id,
+    )
 
+    return {"retrieved_chunks": retrieved_chunks}
     document_ids = list(
         {str(chunk.metadata.get("document_id", "")) for chunk in retrieved_chunks}
     )
@@ -94,7 +100,7 @@ async def synthesizer_node(state: RAGState) -> dict[str, Any]:
         user_message=masked_query,
         context_chunks=context_texts,
     )
-
+    logger.info("LLM generation complete", response_length=len(response))
     return {"llm_response": response}
 
 

@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt_handler import decode_token
 from app.db.models import User
+from app.logging_config.setup import get_logger
 
 # Defines the scheme for Swagger UI integration and token extraction
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 limiter = Limiter(key_func=get_remote_address)
+logger = get_logger(__name__)
 
 
 async def get_redis(request: Request) -> Redis:
@@ -62,9 +64,10 @@ async def get_current_user(
         payload = decode_token(token)
         user_id_str: str | None = payload.get("sub")
         if user_id_str is None:
+            logger.warning("Token decoding failed: 'sub' claim is missing")
             raise credentials_exception
-    # Catch the error as 'e' and chain it using 'from e'
     except JWTError as e:
+        logger.warning("Invalid JWT token provided", error=str(e))
         raise credentials_exception from e
 
     # Execute DB lookup to ensure user hasn't been deleted or deactivated
@@ -73,9 +76,11 @@ async def get_current_user(
     user = result.scalar_one_or_none()
 
     if user is None:
+        logger.warning("Token validated but user not found in DB", user_id=user_id_str)
         raise credentials_exception
 
     if not user.is_active:
+        logger.warning("Inactive user attempted access", user_id=user_id_str)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user account"
         )

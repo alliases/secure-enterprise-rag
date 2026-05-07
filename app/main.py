@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Initialize Redis pool
     app.state.redis = from_url(
-        settings.redis_url,
+        str(settings.redis_url),
         encoding="utf-8",
         decode_responses=False,
     )
