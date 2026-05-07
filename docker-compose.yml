@@ -9,16 +9,30 @@ services:
     env_file:
       - .env.docker
     depends_on:
-      - qdrant
-      - redis
-      - postgres
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1536M
     networks:
       - rag-network
     logging:
       driver: "json-file"
       options:
-        max-size: "10m"  # Max size per log file
-        max-file: "3"    # Keep only 3 rotated files
+        max-size: "10m"
+        max-file: "3"
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -26,6 +40,16 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
     networks:
       - rag-network
 
@@ -36,6 +60,16 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
     networks:
       - rag-network
 
@@ -49,14 +83,24 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     networks:
       - rag-network
-
-networks:
-  rag-network:
-    driver: bridge
 
 volumes:
   qdrant_data:
   redis_data:
   postgres_data:
+
+networks:
+  rag-network:
+    driver: bridge
