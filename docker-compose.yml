@@ -1,5 +1,4 @@
 # Infrastructure setup for Secure Enterprise RAG
-# Defines FastAPI app, Qdrant, Redis, and PostgreSQL services [cite: 243]
 services:
   app:
     build:
@@ -8,15 +7,18 @@ services:
     ports:
       - "8000:8000"
     env_file:
-      - .env
-    environment:
-      POSTGRES_DSN: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/rag_db"
+      - .env.docker
     depends_on:
       - qdrant
       - redis
       - postgres
     networks:
       - rag-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"  # Max size per log file
+        max-file: "3"    # Keep only 3 rotated files
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -31,7 +33,6 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    # Ensure AOF persistence is enabled for durability [cite: 246]
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -51,7 +52,6 @@ services:
     networks:
       - rag-network
 
-# Dedicated bridge network for isolated service communication [cite: 248]
 networks:
   rag-network:
     driver: bridge

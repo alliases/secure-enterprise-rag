@@ -1,16 +1,15 @@
-# File: app/config.py
-# Purpose: Centralized application configuration with Pydantic BaseSettings.
-
+import os
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import PostgresDsn, SecretStr
+from pydantic import PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     # Core Infrastructure
     postgres_dsn: PostgresDsn
-    redis_url: str
+    redis_url: RedisDsn  # Enforces valid Redis URI at startup
     qdrant_host: str
     qdrant_port: int
 
@@ -25,21 +24,19 @@ class Settings(BaseSettings):
 
     # ML Models
     embedding_model: str = "text-embedding-3-small"
-    local_model_revision: str | None = (
-        None  # e.g., "main" or specific commit hash for safetensors
-    )
+    local_model_revision: str | None = None
     llm_model: str = "gpt-4o"
 
     # RAG Configuration
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
-    # Observability
-    log_level: str = "INFO"
+    # Observability & Environment
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    app_env: Literal["local", "docker", "production"] = "local"
 
-    # Configuration for loading from .env file
+    # Base configuration for Pydantic Settings
     model_config = SettingsConfigDict(
-        env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -50,6 +47,10 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """
     Returns a cached instance of the Settings object.
-    Singleton pattern ensures .env is parsed only once.
+    Dynamically loads the target .env file based on APP_ENV OS variable.
     """
-    return Settings()  # type: ignore[call-arg]
+    env_state = os.getenv("APP_ENV", "local")
+    target_env_file = f".env.{env_state}"
+
+    # Overriding the default env_file dynamically
+    return Settings(_env_file=target_env_file)  # type: ignore[call-arg]

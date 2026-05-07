@@ -1,5 +1,7 @@
 # === Security & Environments ===
 .env
+.env.local
+.env.docker
 .venv/
 venv/
 env/
