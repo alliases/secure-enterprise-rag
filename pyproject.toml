@@ -80,6 +80,7 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = [
     "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+    "ignore::DeprecationWarning:.*importlib.*",
     "ignore:Support for class-based `config` is deprecated:DeprecationWarning"
 ]
 markers = [
