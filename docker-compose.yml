@@ -10,7 +10,7 @@ services:
       - .env.docker
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
       redis:
         condition: service_healthy
       postgres:
@@ -40,16 +40,11 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '1.5'
+          memory: 1536M
     networks:
       - rag-network
 
