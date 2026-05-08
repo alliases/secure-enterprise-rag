@@ -21,10 +21,6 @@ from app.metrics import INGESTION_TOTAL
 from app.vectorstore.embedder import embed_texts
 from app.vectorstore.qdrant_client import upsert_chunks
 
-# Placeholder for Task 2.2 imports
-# from app.vectorstore.embedder import embed_texts
-# from app.vectorstore.qdrant_client import upsert_chunks
-
 logger = get_logger(__name__)
 
 
