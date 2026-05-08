@@ -3,7 +3,7 @@
 
 from fastapi import APIRouter
 
-from app.api.endpoints import auth, health, ingest, query
+from app.api.endpoints import admin, auth, health, ingest, query
 
 api_router = APIRouter()
 
@@ -11,3 +11,4 @@ api_router.include_router(health.router, tags=["Monitoring"])
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(ingest.router, prefix="/ingest", tags=["Ingestion"])
 api_router.include_router(query.router, prefix="/query", tags=["Query"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin Management"])
