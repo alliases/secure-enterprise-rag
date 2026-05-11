@@ -7,6 +7,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    MatchAny,
     MatchValue,
     PayloadSchemaType,
     PointStruct,
@@ -108,10 +109,29 @@ async def search_similar(
     """
     Executes a semantic search with strict metadata filtering.
     """
+    # Support both backward compatibility (legacy string) and new array structures
     query_filter = Filter(
         must=[
-            FieldCondition(key="department_id", match=MatchValue(value=department_id)),
-            FieldCondition(key="access_level", match=MatchValue(value=access_level)),
+            Filter(
+                should=[
+                    FieldCondition(
+                        key="department_ids", match=MatchAny(any=[department_id])
+                    ),
+                    FieldCondition(
+                        key="department_id", match=MatchValue(value=department_id)
+                    ),
+                ]
+            ),
+            Filter(
+                should=[
+                    FieldCondition(
+                        key="access_levels", match=MatchAny(any=[access_level])
+                    ),
+                    FieldCondition(
+                        key="access_level", match=MatchValue(value=access_level)
+                    ),
+                ]
+            ),
         ]
     )
 
@@ -136,35 +156,3 @@ async def search_similar(
         )
 
     return results
-
-
-async def check_semantic_duplicate(
-    client: AsyncQdrantClient,
-    collection_name: str,
-    query_vector: list[float],
-    department_id: str,
-    access_level: int,
-    threshold: float = 0.98,
-) -> bool:
-    """
-    Level 2 Deduplication: Checks for semantically identical documents using cosine similarity.
-    Returns True if a highly similar chunk exists within the same department/access level.
-    """
-    results = await search_similar(
-        client=client,
-        collection_name=collection_name,
-        query_vector=query_vector,
-        department_id=department_id,
-        access_level=access_level,
-        top_k=1,
-    )
-
-    if results and results[0]["score"] >= threshold:
-        logger.info(
-            "Semantic duplicate detected in Qdrant",
-            score=results[0]["score"],
-            threshold=threshold,
-        )
-        return True
-
-    return False

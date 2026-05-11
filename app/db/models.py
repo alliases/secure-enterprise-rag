@@ -63,6 +63,15 @@ class Document(Base):
         String(50), default="pending"
     )  # pending, processing, done, error, duplicate
     file_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+
+    # Level 2 Deduplication tracking
+    canonical_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    dedup_strategy: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

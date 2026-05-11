@@ -1,7 +1,5 @@
 # File: app/api/endpoints/ingest.py
 # Purpose: Endpoints for document uploading and ingestion status tracking.
-
-import hashlib
 import shutil
 import uuid
 from pathlib import Path
@@ -21,12 +19,12 @@ from fastapi import (
 )
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.rbac import require_role
 from app.db.models import Document
 from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
+from app.ingestion.deduplicator import check_exact_duplicate, compute_file_hash
 from app.ingestion.pipeline import run_ingestion
 from app.logging_config.setup import get_logger
 
@@ -94,17 +92,22 @@ async def upload_document(
         )
 
     # 4. Level 1 Deduplication: Exact SHA-256 Match
-    file_hash = hashlib.sha256(content).hexdigest()
-    stmt = select(Document).where(Document.file_hash == file_hash)
-    existing_doc = await db.scalar(stmt)
+    file_hash = compute_file_hash(content)
+    existing_id = await check_exact_duplicate(db, file_hash, department_id)
 
-    if existing_doc:
+    if existing_id:
         logger.info(
-            "Exact document duplicate prevented at Level 1", file_hash=file_hash
+            "Exact document duplicate prevented at Level 1",
+            file_hash=file_hash,
+            existing_document_id=existing_id,
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="An identical document already exists in the system.",
+            detail={
+                "error": "duplicate_document",
+                "existing_document_id": existing_id,
+                "message": "An identical document already exists in this department.",
+            },
         )
 
     document_id = uuid.uuid4()

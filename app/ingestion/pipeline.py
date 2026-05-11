@@ -13,13 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import AuditLog, Document
 from app.ingestion.chunker import chunk_text
+from app.ingestion.deduplicator import process_chunk_deduplication
 from app.ingestion.parser import parse_document
 from app.logging_config.setup import get_logger
 from app.masking.mapping_store import store_mappings
 from app.masking.presidio_engine import analyze_text, mask_text
 from app.metrics import INGESTION_TOTAL
-from app.vectorstore.embedder import embed_query, embed_texts
-from app.vectorstore.qdrant_client import check_semantic_duplicate, upsert_chunks
+from app.vectorstore.embedder import embed_texts
+from app.vectorstore.qdrant_client import upsert_chunks
 
 logger = get_logger(__name__)
 
@@ -71,29 +72,6 @@ async def run_ingestion(
                 await db_session.commit()
                 return
 
-            # Level 2 Deduplication: Semantic check using strictly masked first chunk
-            first_chunk_analyzer = analyze_text(chunks[0].text)
-            first_chunk_masked = mask_text(chunks[0].text, first_chunk_analyzer)
-            first_chunk_vector = await embed_query(first_chunk_masked.masked_text)
-
-            is_duplicate = await check_semantic_duplicate(
-                client=qdrant,
-                collection_name="documents",
-                query_vector=first_chunk_vector,
-                department_id=department_id,
-                access_level=access_level,
-                threshold=0.98,
-            )
-
-            if is_duplicate:
-                logger.info(
-                    "Semantic duplicate detected at Level 2, aborting",
-                    document_id=document_id,
-                )
-                doc.status = "duplicate"
-                await db_session.commit()
-                return
-
             masked_chunks_data: list[dict[str, Any]] = []
             total_pii_found = 0
 
@@ -113,17 +91,48 @@ async def run_ingestion(
                         "metadata": chunk.metadata,
                     }
                 )
+            # 5. Embed fully masked texts (Batch execution for speed)
+            masked_texts = [c["text"] for c in masked_chunks_data]
+            vectors = await embed_texts(masked_texts)
 
-            # 5 & 6. Embed and Upsert
-            vectors = await embed_texts([c["text"] for c in masked_chunks_data])
-            await upsert_chunks(qdrant, "documents", masked_chunks_data, vectors)
+            # Level 2: Chunk-Level Deduplication
+            (
+                unique_chunks,
+                unique_vectors,
+                duplicate_count,
+                canonical_doc_id,
+            ) = await process_chunk_deduplication(
+                qdrant=qdrant,
+                masked_chunks_data=masked_chunks_data,
+                vectors=vectors,
+                document_id=document_id,
+                department_id=department_id,
+                access_level=access_level,
+            )
 
-            logger.info("Embedded and upserted chunks", document_id=document_id)
+            logger.info(
+                "Chunk-level deduplication completed",
+                document_id=document_id,
+                unique_chunks=len(unique_chunks),
+                duplicate_chunks=duplicate_count,
+            )
+
+            if len(unique_chunks) == 0:
+                doc.dedup_strategy = "semantic"
+                if canonical_doc_id:
+                    doc.canonical_document_id = uuid.UUID(canonical_doc_id)
+            else:
+                # 6. Upsert ONLY unique chunks
+                await upsert_chunks(
+                    client=qdrant,
+                    collection_name="documents",
+                    chunks=unique_chunks,
+                    vectors=unique_vectors,
+                )
 
             # 7. Update status to done
             doc.status = "done"
-            doc.chunk_count = len(chunks)
-
+            doc.chunk_count = len(unique_chunks)
             # 8. Audit log generation
             audit_entry = AuditLog(
                 user_id=uuid.UUID(user_id),
