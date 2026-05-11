@@ -1,8 +1,8 @@
 up:
-	docker compose --env-file .env.docker up -d --build
+	docker compose -d --build
 
 down:
-	docker compose --env-file .env.docker down
+	docker compose down
 
 run-local:
 	APP_ENV=local poetry run uvicorn app.main:app --reload
