@@ -1,6 +1,7 @@
 # File: app/api/endpoints/ingest.py
 # Purpose: Endpoints for document uploading and ingestion status tracking.
 
+import hashlib
 import shutil
 import uuid
 from pathlib import Path
@@ -20,6 +21,7 @@ from fastapi import (
 )
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.rbac import require_role
@@ -91,6 +93,20 @@ async def upload_document(
             detail=f"Unsupported file extension: {file_ext}. Allowed: {', '.join(set(allowed_exts))}",
         )
 
+    # 4. Level 1 Deduplication: Exact SHA-256 Match
+    file_hash = hashlib.sha256(content).hexdigest()
+    stmt = select(Document).where(Document.file_hash == file_hash)
+    existing_doc = await db.scalar(stmt)
+
+    if existing_doc:
+        logger.info(
+            "Exact document duplicate prevented at Level 1", file_hash=file_hash
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An identical document already exists in the system.",
+        )
+
     document_id = uuid.uuid4()
 
     logger.info(
@@ -121,6 +137,7 @@ async def upload_document(
         department_id=department_id,
         access_level=access_level,
         status="pending",
+        file_hash=file_hash,
         uploaded_by=uuid.UUID(current_user["user_id"]),
     )
     db.add(new_document)

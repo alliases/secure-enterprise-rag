@@ -136,3 +136,35 @@ async def search_similar(
         )
 
     return results
+
+
+async def check_semantic_duplicate(
+    client: AsyncQdrantClient,
+    collection_name: str,
+    query_vector: list[float],
+    department_id: str,
+    access_level: int,
+    threshold: float = 0.98,
+) -> bool:
+    """
+    Level 2 Deduplication: Checks for semantically identical documents using cosine similarity.
+    Returns True if a highly similar chunk exists within the same department/access level.
+    """
+    results = await search_similar(
+        client=client,
+        collection_name=collection_name,
+        query_vector=query_vector,
+        department_id=department_id,
+        access_level=access_level,
+        top_k=1,
+    )
+
+    if results and results[0]["score"] >= threshold:
+        logger.info(
+            "Semantic duplicate detected in Qdrant",
+            score=results[0]["score"],
+            threshold=threshold,
+        )
+        return True
+
+    return False

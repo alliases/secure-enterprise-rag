@@ -18,8 +18,8 @@ from app.logging_config.setup import get_logger
 from app.masking.mapping_store import store_mappings
 from app.masking.presidio_engine import analyze_text, mask_text
 from app.metrics import INGESTION_TOTAL
-from app.vectorstore.embedder import embed_texts
-from app.vectorstore.qdrant_client import upsert_chunks
+from app.vectorstore.embedder import embed_query, embed_texts
+from app.vectorstore.qdrant_client import check_semantic_duplicate, upsert_chunks
 
 logger = get_logger(__name__)
 
@@ -62,6 +62,37 @@ async def run_ingestion(
                 access_level=access_level,
                 source_filename=file_name,
             )
+
+            if not chunks:
+                logger.warning(
+                    "No chunks generated from document", document_id=document_id
+                )
+                doc.status = "error"
+                await db_session.commit()
+                return
+
+            # Level 2 Deduplication: Semantic check using strictly masked first chunk
+            first_chunk_analyzer = analyze_text(chunks[0].text)
+            first_chunk_masked = mask_text(chunks[0].text, first_chunk_analyzer)
+            first_chunk_vector = await embed_query(first_chunk_masked.masked_text)
+
+            is_duplicate = await check_semantic_duplicate(
+                client=qdrant,
+                collection_name="documents",
+                query_vector=first_chunk_vector,
+                department_id=department_id,
+                access_level=access_level,
+                threshold=0.98,
+            )
+
+            if is_duplicate:
+                logger.info(
+                    "Semantic duplicate detected at Level 2, aborting",
+                    document_id=document_id,
+                )
+                doc.status = "duplicate"
+                await db_session.commit()
+                return
 
             masked_chunks_data: list[dict[str, Any]] = []
             total_pii_found = 0

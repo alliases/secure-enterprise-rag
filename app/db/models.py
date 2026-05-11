@@ -61,7 +61,8 @@ class Document(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(
         String(50), default="pending"
-    )  # pending, processing, done, error
+    )  # pending, processing, done, error, duplicate
+    file_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
