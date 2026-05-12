@@ -11,7 +11,7 @@ from app.logging_config.setup import get_logger
 
 logger = get_logger(__name__)
 
-SEMANTIC_THRESHOLD = 0.95
+SEMANTIC_THRESHOLD = 0.985
 
 
 def compute_file_hash(content: bytes) -> str:

@@ -29,11 +29,12 @@ def chunk_text(
 ) -> list[Chunk]:
     """
     Splits the input text into chunks using RecursiveCharacterTextSplitter.
-    Injects document-level metadata into each chunk for downstream vector filtering (RBAC).
+    Prioritizes paragraph boundaries (\\n\\n) to ensure atomic changes (like amendments)
+    are isolated into their own highly unique vectors.
     """
     settings = get_settings()
 
-    # The separator list is prioritized: paragraphs -> sentences -> words
+    # The separator list is strictly prioritized: paragraphs -> sentences -> words
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
@@ -44,7 +45,7 @@ def chunk_text(
     raw_chunks = splitter.split_text(text)
     processed_chunks: list[Chunk] = []
 
-    for index, chunk_text in enumerate(raw_chunks):
+    for index, chunk_text_part in enumerate(raw_chunks):
         # Isolate metadata per chunk to prevent reference mutation bugs
         chunk_metadata: dict[str, Any] = {
             "document_id": document_id,
@@ -56,7 +57,7 @@ def chunk_text(
 
         processed_chunks.append(
             Chunk(
-                text=chunk_text,
+                text=chunk_text_part,
                 metadata=chunk_metadata,
                 chunk_index=index,
             )
