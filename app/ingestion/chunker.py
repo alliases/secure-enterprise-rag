@@ -28,24 +28,32 @@ def chunk_text(
     source_filename: str,
 ) -> list[Chunk]:
     """
-    Splits the input text into chunks using RecursiveCharacterTextSplitter.
-    Prioritizes paragraph boundaries (\\n\\n) to ensure atomic changes (like amendments)
-    are isolated into their own highly unique vectors.
+    Splits the input text strictly by paragraphs first to guarantee semantic isolation.
+    Falls back to RecursiveCharacterTextSplitter only for oversized paragraphs.
     """
     settings = get_settings()
 
-    # The separator list is strictly prioritized: paragraphs -> sentences -> words
+    # Removed \n\n from separators as it is handled manually prior to LangChain
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        separators=["\n", ". ", " ", ""],
         length_function=len,
     )
 
-    raw_chunks = splitter.split_text(text)
+    # 1. Strict explicit split by paragraph boundaries
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    final_raw_chunks: list[str] = []
+    for paragraph in paragraphs:
+        if len(paragraph) > settings.chunk_size:
+            final_raw_chunks.extend(splitter.split_text(paragraph))
+        else:
+            final_raw_chunks.append(paragraph)
+
     processed_chunks: list[Chunk] = []
 
-    for index, chunk_text_part in enumerate(raw_chunks):
+    for index, chunk_text_part in enumerate(final_raw_chunks):
         # Isolate metadata per chunk to prevent reference mutation bugs
         chunk_metadata: dict[str, Any] = {
             "document_id": document_id,

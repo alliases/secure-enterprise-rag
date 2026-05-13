@@ -2,11 +2,14 @@
 # Purpose: PII identification and masking logic using Microsoft Presidio.
 import re
 from dataclasses import dataclass, field
+from typing import cast
 
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from app.masking.regex_patterns import get_custom_recognizers
 from app.metrics import PII_ENTITIES_TOTAL
+
+_EMBEDDING_NORMALIZE_REGEX = re.compile(r"\[([A-Z_]+)_\d+\]")
 
 
 def normalize_for_embedding(text: str) -> str:
@@ -17,7 +20,7 @@ def normalize_for_embedding(text: str) -> str:
     between identical paragraphs.
     """
     # Matches any uppercase string with underscores inside brackets, followed by _ and digits
-    return re.sub(r"\[([A-Z_]+)_\d+\]", r"[\1]", text)
+    return _EMBEDDING_NORMALIZE_REGEX.sub(r"[\1]", text)
 
 
 @dataclass
@@ -27,7 +30,7 @@ class MaskedResult:
     """
 
     masked_text: str
-    mappings: dict[str, str] = field(default_factory=lambda: {})
+    mappings: dict[str, str] = field(default_factory=lambda: cast(dict[str, str], {}))
 
 
 def initialize_analyzer() -> AnalyzerEngine:
@@ -73,24 +76,30 @@ def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResu
             filtered_results.append(res)
 
     # 2. Sort results by start position descending to avoid index shifting during string manipulation
-    sorted_results = sorted(filtered_results, key=lambda x: x.start, reverse=True)
+    sorted_ltr_results = sorted(filtered_results, key=lambda x: x.start)
 
     masked_text = text
     mappings: dict[str, str] = {}
     entity_counters: dict[str, int] = {}
 
-    for result in sorted_results:
+    # Store operations to apply them right-to-left later
+    replacements: list[tuple[int, int, str, str]] = []
+
+    for result in sorted_ltr_results:
         entity_type = result.entity_type
         original_value = text[result.start : result.end]
         PII_ENTITIES_TOTAL.labels(entity_type=entity_type).inc()
-        # Increment counter to generate unique tokens per entity type (e.g., PERSON_1, PERSON_2)
+
+        # Assign incrementing IDs naturally from the start of the document
         count = entity_counters.get(entity_type, 0) + 1
         entity_counters[entity_type] = count
 
         token = f"[{entity_type}_{count}]"
-        mappings[token] = original_value
+        replacements.append((result.start, result.end, token, original_value))
 
-        # Replace original text with the generated token
-        masked_text = masked_text[: result.start] + token + masked_text[result.end :]
+    # 3. Apply replacements right-to-left to prevent string index shifting
+    for start, end, token, original_value in reversed(replacements):
+        mappings[token] = original_value
+        masked_text = masked_text[:start] + token + masked_text[end:]
 
     return MaskedResult(masked_text=masked_text, mappings=mappings)
