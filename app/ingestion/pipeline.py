@@ -91,9 +91,15 @@ async def run_ingestion(
                         "metadata": chunk.metadata,
                     }
                 )
+
             # 5. Embed fully masked texts (Batch execution for speed)
-            masked_texts = [c["text"] for c in masked_chunks_data]
-            vectors = await embed_texts(masked_texts)
+            # CRITICAL: Apply token normalization ONLY for embeddings to prevent index-shift false negatives
+            from app.masking.presidio_engine import normalize_for_embedding
+
+            normalized_texts_for_embedding = [
+                normalize_for_embedding(c["text"]) for c in masked_chunks_data
+            ]
+            vectors = await embed_texts(normalized_texts_for_embedding)
 
             # Level 2: Chunk-Level Deduplication
             (

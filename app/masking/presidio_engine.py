@@ -1,11 +1,23 @@
 # File: app/masking/presidio_engine.py
 # Purpose: PII identification and masking logic using Microsoft Presidio.
+import re
 from dataclasses import dataclass, field
 
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 
 from app.masking.regex_patterns import get_custom_recognizers
 from app.metrics import PII_ENTITIES_TOTAL
+
+
+def normalize_for_embedding(text: str) -> str:
+    """
+    Strips numerical indices from PII tokens (e.g., [PERSON_1] -> [PERSON]).
+    This is critical for semantic embedding consistency. It prevents index shifting
+    caused by document amendments from artificially lowering the cosine similarity
+    between identical paragraphs.
+    """
+    # Matches any uppercase string with underscores inside brackets, followed by _ and digits
+    return re.sub(r"\[([A-Z_]+)_\d+\]", r"[\1]", text)
 
 
 @dataclass
