@@ -1,7 +1,10 @@
 # File: app/ingestion/deduplicator.py
+import asyncio
 import hashlib
+from collections.abc import Coroutine
 from typing import Any
 
+from fastapi import UploadFile
 from qdrant_client import AsyncQdrantClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +17,17 @@ logger = get_logger(__name__)
 SEMANTIC_THRESHOLD = 0.985
 
 
-def compute_file_hash(content: bytes) -> str:
-    """SHA-256 of raw file bytes."""
-    return hashlib.sha256(content).hexdigest()
+async def compute_file_hash_stream(file: UploadFile, chunk_size: int = 65536) -> str:
+    """
+    Calculates SHA-256 using an async generator to prevent OOM on large files.
+    Reads in 64KB chunks by default.
+    """
+    hasher = hashlib.sha256()
+    await file.seek(0)
+    while chunk := await file.read(chunk_size):
+        hasher.update(chunk)
+    await file.seek(0)
+    return hasher.hexdigest()
 
 
 async def check_exact_duplicate(
@@ -89,6 +100,7 @@ async def process_chunk_deduplication(
     document_id: str,
     department_id: str,
     access_level: int,
+    update_tasks: list[Coroutine[Any, Any, None]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[list[float]], int, str | None]:
     """
     Evaluates each chunk individually for semantic duplicates.
@@ -96,10 +108,13 @@ async def process_chunk_deduplication(
     """
     from app.vectorstore.qdrant_client import search_similar
 
+    if update_tasks is None:
+        update_tasks = []
+
     unique_chunks: list[dict[str, Any]] = []
     unique_vectors: list[list[float]] = []
     duplicate_count = 0
-    canonical_doc_id = None
+    canonical_doc_id: str | None = None
 
     for chunk, vector in zip(masked_chunks_data, vectors, strict=True):
         results = await search_similar(
@@ -116,7 +131,7 @@ async def process_chunk_deduplication(
             score = float(results[0]["score"])
             if score >= SEMANTIC_THRESHOLD:
                 payload = results[0].get("payload", {})
-                point_id = results[0]["id"]
+                point_id = str(results[0]["id"])
 
                 doc_ids = payload.get("document_ids", [payload.get("document_id")])
                 str_doc_ids = [str(d) for d in doc_ids if d]
@@ -129,17 +144,22 @@ async def process_chunk_deduplication(
                     if not canonical_doc_id and str_doc_ids:
                         canonical_doc_id = str_doc_ids[0]
 
-                    await update_chunk_metadata(
-                        qdrant=qdrant,
-                        point_id=point_id,
-                        existing_payload=payload,
-                        new_document_id=document_id,
-                        new_department_id=department_id,
-                        new_access_level=access_level,
+                    update_tasks.append(
+                        update_chunk_metadata(
+                            qdrant=qdrant,
+                            point_id=point_id,
+                            existing_payload=payload,
+                            new_document_id=document_id,
+                            new_department_id=department_id,
+                            new_access_level=access_level,
+                        )
                     )
 
         if not is_duplicate:
             unique_chunks.append(chunk)
             unique_vectors.append(vector)
+
+    if update_tasks:
+        await asyncio.gather(*update_tasks)
 
     return unique_chunks, unique_vectors, duplicate_count, canonical_doc_id

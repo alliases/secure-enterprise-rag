@@ -117,12 +117,22 @@ async def run_ingestion(
                 duplicate_chunks=duplicate_count,
             )
 
-            if len(unique_chunks) == 0:
-                doc.dedup_strategy = "semantic"
+            if duplicate_count > 0 and len(unique_chunks) == 0:
+                doc.dedup_strategy = "semantic_full"
                 if canonical_doc_id:
                     doc.canonical_document_id = uuid.UUID(canonical_doc_id)
+            elif duplicate_count > 0 and len(unique_chunks) > 0:
+                doc.dedup_strategy = "semantic_partial"
+                if canonical_doc_id:
+                    doc.canonical_document_id = uuid.UUID(canonical_doc_id)
+                await upsert_chunks(
+                    client=qdrant,
+                    collection_name="documents",
+                    chunks=unique_chunks,
+                    vectors=unique_vectors,
+                )
             else:
-                # 6. Upsert ONLY unique chunks
+                doc.dedup_strategy = "none"
                 await upsert_chunks(
                     client=qdrant,
                     collection_name="documents",

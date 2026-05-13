@@ -1,10 +1,10 @@
 # File: app/api/endpoints/ingest.py
 # Purpose: Endpoints for document uploading and ingestion status tracking.
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
+import aiofiles
 import magic
 from fastapi import (
     APIRouter,
@@ -24,7 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.rbac import require_role
 from app.db.models import Document
 from app.dependencies import get_current_user, get_db_session, get_qdrant, get_redis
-from app.ingestion.deduplicator import check_exact_duplicate, compute_file_hash
+from app.ingestion.deduplicator import (
+    check_exact_duplicate,
+    compute_file_hash_stream,
+)
 from app.ingestion.pipeline import run_ingestion
 from app.logging_config.setup import get_logger
 
@@ -62,16 +65,17 @@ async def upload_document(
     Accepts a document file, validates magic bytes and size, saves it temporarily,
     and starts the ingestion background task.
     """
-    # 1. Size Validation (Protect against memory exhaustion)
-    content = await file.read()
-    if len(content) > MAX_FILE_SIZE_MB * 1024 * 1024:
+    # 1. Size Validation (Protect against memory exhaustion via metadata)
+    if file.size and file.size > MAX_FILE_SIZE_MB * 1024 * 1024:
+        logger.warning("Upload rejected: File size exceeds limit", file_size=file.size)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File too large. Max allowed size is {MAX_FILE_SIZE_MB}MB.",
         )
 
     # 2. Magic Bytes Validation (Protect against CWE-434 arbitrary file upload)
-    mime_type = magic.from_buffer(content[:2048], mime=True)
+    header_chunk = await file.read(2048)
+    mime_type = magic.from_buffer(header_chunk, mime=True)
 
     # Fallback allowance for generic text variants detected by magic (e.g. text/x-script)
     if mime_type not in ALLOWED_MIMES and not mime_type.startswith("text/"):
@@ -79,8 +83,6 @@ async def upload_document(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid or unsupported file content type: {mime_type}",
         )
-
-    await file.seek(0)  # Reset file pointer for standard save logic
 
     # 3. Extension Alignment Validation
     file_ext = Path(file.filename or "").suffix.lstrip(".").lower()
@@ -91,8 +93,8 @@ async def upload_document(
             detail=f"Unsupported file extension: {file_ext}. Allowed: {', '.join(set(allowed_exts))}",
         )
 
-    # 4. Level 1 Deduplication: Exact SHA-256 Match
-    file_hash = compute_file_hash(content)
+    # 4. Level 1 Deduplication: Exact SHA-256 Match via Async Streaming
+    file_hash = await compute_file_hash_stream(file)
     existing_id = await check_exact_duplicate(db, file_hash, department_id)
 
     if existing_id:
@@ -116,7 +118,7 @@ async def upload_document(
         "Document upload validated and ingestion scheduled",
         document_id=str(document_id),
         filename=file.filename,
-        file_size_bytes=len(content),
+        file_size_bytes=file.size or 0,
         mime_type=mime_type,
         department_id=department_id,
         user_id=current_user["user_id"],
@@ -124,8 +126,10 @@ async def upload_document(
     temp_file_path = UPLOAD_DIR / f"{document_id}.{file_ext}"
 
     try:
-        with temp_file_path.open("wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        await file.seek(0)
+        async with aiofiles.open(temp_file_path, "wb") as buffer:
+            while chunk := await file.read(65536):
+                await buffer.write(chunk)
     except Exception as e:
         logger.error("Failed to save uploaded file", error=str(e))
         raise HTTPException(

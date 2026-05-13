@@ -28,8 +28,8 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-4o"
 
     # RAG Configuration
-    chunk_size: int = 1000
-    chunk_overlap: int = 200
+    chunk_size: int = 150
+    chunk_overlap: int = 20
 
     # Observability & Environment
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"

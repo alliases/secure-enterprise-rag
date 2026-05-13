@@ -56,6 +56,7 @@ prometheus-fastapi-instrumentator = "^7.1.0"
 prometheus-client = "^0.25.0"
 asgi-correlation-id = "^4.3.4"
 pydantic = {extras = ["email"], version = "^2.13.4"}
+aiofiles = "^25.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
