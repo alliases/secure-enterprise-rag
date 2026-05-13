@@ -95,9 +95,26 @@ async def upload_document(
 
     # 4. Level 1 Deduplication: Exact SHA-256 Match via Async Streaming
     file_hash = await compute_file_hash_stream(file)
+
+    # 4.1 Redis Distributed Lock to prevent Race Conditions on identical concurrent uploads
+    lock_key = f"lock:ingest:{department_id}:{file_hash}"
+    lock_acquired = await redis.set(lock_key, "locked", nx=True, ex=300)  # 5 min TTL
+
+    if not lock_acquired:
+        logger.warning(
+            "Upload blocked by Redis lock (Race Condition prevented)",
+            file_hash=file_hash,
+            department_id=department_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A file with this exact content is currently being processed. Please wait.",
+        )
+
     existing_id = await check_exact_duplicate(db, file_hash, department_id)
 
     if existing_id:
+        await redis.delete(lock_key)  # Fast cleanup if it's already successfully in DB
         logger.info(
             "Exact document duplicate prevented at Level 1",
             file_hash=file_hash,

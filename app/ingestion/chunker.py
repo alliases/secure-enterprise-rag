@@ -1,6 +1,6 @@
 # File: app/ingestion/chunker.py
 # Purpose: Split raw text into manageable chunks with semantic overlap.
-
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,7 +42,7 @@ def chunk_text(
     )
 
     # 1. Strict explicit split by paragraph boundaries
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    paragraphs = [p.strip() for p in re.split(r"\r?\n[ \t]*\r?\n", text) if p.strip()]
 
     final_raw_chunks: list[str] = []
     for paragraph in paragraphs:

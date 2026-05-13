@@ -70,6 +70,7 @@ collect_context.pyw
 project_context.txt
 collect_tests_context.py
 tests_context.txt
+docker-compose.override.yml
 
 # === Uploads ===
 temp_uploads/

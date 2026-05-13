@@ -76,6 +76,7 @@ def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResu
             filtered_results.append(res)
 
     # 2. Sort results by start position descending to avoid index shifting during string manipulation
+    # String index shifting is prevented later by applying replacements right-to-left.
     sorted_ltr_results = sorted(filtered_results, key=lambda x: x.start)
 
     masked_text = text
