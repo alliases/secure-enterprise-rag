@@ -1,6 +1,6 @@
 # File: app/masking/mapping_store.py
 # Purpose: CRUD operations for PII mappings in Redis.
-
+import re
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from typing import cast
@@ -99,3 +99,23 @@ async def delete_mappings(redis: Redis, document_id: str) -> int:
     # Delete all matched keys in a single command
     deleted_count = await redis.delete(*keys_to_delete)
     return deleted_count
+
+
+async def get_max_token_indices(redis: Redis, document_id: str) -> dict[str, int]:
+    """
+    Hydrates the maximum token index for each entity type from an existing document.
+    Used to prevent token collisions during incremental document updates.
+    """
+    mappings = await retrieve_mappings(redis, document_id)
+    counters: dict[str, int] = {}
+
+    for token in mappings:
+        # Parses tokens like [PERSON_1], [FINANCIAL_12]
+        match = re.match(r"\[([A-Z_]+)_(\d+)\]", token)
+        if match:
+            entity_type = match.group(1)
+            index = int(match.group(2))
+            if index > counters.get(entity_type, 0):
+                counters[entity_type] = index
+
+    return counters

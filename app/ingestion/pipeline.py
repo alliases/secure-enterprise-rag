@@ -75,8 +75,32 @@ async def run_ingestion(
             masked_chunks_data: list[dict[str, Any]] = []
             total_pii_found = 0
 
+            # Incremental State Hydration: Find previous version of this file to continue token numbering
+            from sqlalchemy import select
+
+            from app.masking.mapping_store import get_max_token_indices
+
+            stmt = (
+                select(Document.id)
+                .where(Document.filename == file_name)
+                .where(Document.department_id == department_id)
+                .where(Document.status == "done")
+                .order_by(Document.created_at.desc())
+                .limit(1)
+            )
+            prev_doc_id = await db_session.scalar(stmt)
+
             # Global state for Stateful Document PII Mapping across all chunks
             global_entity_counters: dict[str, int] = {}
+            if prev_doc_id:
+                global_entity_counters = await get_max_token_indices(
+                    redis, str(prev_doc_id)
+                )
+                logger.info(
+                    "Hydrated PII counters from previous document version",
+                    prev_doc_id=str(prev_doc_id),
+                    counters=global_entity_counters,
+                )
 
             # 4. Mask and store PII mappings
             for chunk in chunks:
