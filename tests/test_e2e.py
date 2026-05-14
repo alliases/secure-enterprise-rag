@@ -9,6 +9,8 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from qdrant_client import AsyncQdrantClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import get_password_hash
@@ -25,7 +27,7 @@ PDF_MAGIC_BYTES = (
 
 @pytest_asyncio.fixture
 async def e2e_client(
-    db_session: AsyncSession, mock_redis, mock_qdrant
+    db_session: AsyncSession, mock_redis: Redis, mock_qdrant: AsyncQdrantClient
 ) -> AsyncGenerator[AsyncClient]:
     """Test client overriding the DB session and injecting external API mocks into app state."""
     limiter.enabled = False
