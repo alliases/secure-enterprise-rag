@@ -15,10 +15,13 @@ from httpx import ASGITransport, AsyncClient
 os.environ["REDIS_ENCRYPTION_KEY"] = Fernet.generate_key().decode("utf-8")
 from unittest.mock import AsyncMock, patch
 
-import fakeredis.aioredis
 import pytest_asyncio
+from qdrant_client import AsyncQdrantClient
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer  # type: ignore[import-untyped]
+from testcontainers.qdrant import QdrantContainer  # type: ignore[import-untyped]
+from testcontainers.redis import RedisContainer  # type: ignore[import-untyped]
 
 from app.auth.jwt_handler import create_access_token
 from app.db.models import Base
@@ -67,25 +70,50 @@ async def db_session(
     await engine.dispose()
 
 
+@pytest.fixture(scope="session")
+def redis_container() -> Generator[RedisContainer]:
+    """Spins up a real Redis container for the test session."""
+    with RedisContainer("redis:7-alpine") as redis:
+        yield redis
+
+
 @pytest_asyncio.fixture
-async def mock_redis() -> AsyncGenerator[fakeredis.aioredis.FakeRedis]:
-    """
-    Provides a fully functional in-memory Redis mock.
-    """
-    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
-    yield redis
-    await redis.aclose()
+async def mock_redis(redis_container: RedisContainer) -> AsyncGenerator[Redis]:
+    """Provides a real async Redis client connected to the Testcontainer."""
+    client = Redis.from_url(
+        f"redis://{redis_container.get_container_host_ip()}:{redis_container.get_exposed_port(6379)}"
+    )
+    yield client
+    # Teardown: flush all keys to ensure test isolation
+    await client.flushall()
+    await client.aclose()
 
 
-@pytest.fixture
-def mock_qdrant() -> AsyncMock:
-    """
-    Mocks the AsyncQdrantClient to prevent network calls to the vector DB.
-    """
-    client = AsyncMock()
-    client.collection_exists.return_value = True
-    client.upsert.return_value = AsyncMock(status="completed")
-    return client
+@pytest.fixture(scope="session")
+def qdrant_container() -> Generator[QdrantContainer]:
+    """Spins up a real Qdrant container for the test session."""
+    with QdrantContainer("qdrant/qdrant:latest") as qdrant:
+        yield qdrant
+
+
+@pytest_asyncio.fixture
+async def mock_qdrant(
+    qdrant_container: QdrantContainer,
+) -> AsyncGenerator[AsyncQdrantClient]:
+    """Provides a real async Qdrant client connected to the Testcontainer."""
+    client = AsyncQdrantClient(
+        host=qdrant_container.get_container_host_ip(),
+        port=qdrant_container.get_exposed_port(6333),
+    )
+
+    from app.vectorstore.qdrant_client import init_collection
+
+    await init_collection(client, "documents", vector_size=1536)
+
+    yield client
+
+    # Teardown: drop the collection to reset state for the next test
+    await client.delete_collection("documents")
 
 
 @pytest.fixture
