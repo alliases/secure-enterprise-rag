@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-import docx  # type: ignore[import-untyped]
-import fitz  # PyMuPDF # type: ignore[import-untyped]
+from unstructured.documents.elements import Table  # type: ignore[import-untyped]
+from unstructured.partition.docx import partition_docx  # type: ignore[import-untyped]
+from unstructured.partition.pdf import partition_pdf  # type: ignore[import-untyped]
+from unstructured.partition.text import partition_text  # type: ignore[import-untyped]
 
 from app.logging_config.setup import get_logger
 
@@ -27,62 +29,79 @@ class ParsedDocument:
     metadata: dict[str, Any]
 
 
-def parse_pdf(file_path: Path) -> tuple[str, int]:
+def _extract_text_and_tables(elements: list[Any]) -> str:
     """
-    Extracts text from a PDF file using PyMuPDF.
-    Returns a tuple containing the concatenated text and the total page count.
+    Iterates through unstructured elements, preserving structural integrity.
+    If an element is a Table, it attempts to extract the HTML or Markdown
+    representation to maintain cell relationships for the LLM.
     """
     text_blocks: list[str] = []
-    page_count = 0
 
+    for element in elements:
+        if isinstance(element, Table):
+            # Safe dynamic attribute access for untyped library
+            metadata = getattr(element, "metadata", None)
+            md_text = getattr(metadata, "text_as_markdown", None) if metadata else None
+            html_text = getattr(metadata, "text_as_html", None) if metadata else None
+
+            if md_text:
+                text_blocks.append(str(md_text))
+            elif html_text:
+                text_blocks.append(str(html_text))
+            else:
+                text_blocks.append(str(element))
+        else:
+            text_blocks.append(str(element))
+
+    return "\n\n".join(text_blocks)
+
+
+def parse_pdf(file_path: Path) -> tuple[str, int]:
+    """
+    Extracts text from a PDF file using unstructured.io.
+    Utilizes 'hi_res' strategy to trigger layout detection and table extraction.
+    """
     try:
-        # Context manager ensures the document stream is closed properly
-        with fitz.open(str(file_path)) as doc:
-            page_count = len(doc)
-            for page in doc:
-                # Explicitly cast to str to resolve PyMuPDF Union return type
-                text = cast(str, page.get_text())  # type: ignore[reportUnknownMemberType]
-                text_blocks.append(text)
+        # Cast to list[Any] to bypass strict type checking for untyped external returns
+        elements = cast(
+            list[Any],
+            partition_pdf(
+                filename=str(file_path),
+                strategy="hi_res",
+                infer_table_structure=True,
+                languages=["eng"],
+            ),
+        )
+
+        # Deduce page count securely using getattr
+        page_numbers: list[int] = []
+        for el in elements:
+            meta = getattr(el, "metadata", None)
+            if meta:
+                p_num = getattr(meta, "page_number", None)
+                if isinstance(p_num, int):
+                    page_numbers.append(p_num)
+
+        page_count = max(page_numbers) if page_numbers else 1
+
+        return _extract_text_and_tables(elements), int(page_count)
     except Exception as e:
         logger.error("PDF parsing failed", file_path=str(file_path), error=str(e))
         raise ParseError(f"Failed to parse PDF document: {e!s}") from e
 
-    return "\n\n".join(text_blocks), page_count
-
 
 def parse_docx(file_path: Path) -> str:
     """
-    Extracts text from a DOCX file using python-docx.
-    Iterates through paragraphs and concatenates non-empty text blocks.
+    Extracts text from a DOCX file using unstructured.io.
+    Automatically identifies and extracts standard paragraphs and tables.
     """
-    text_blocks: list[str] = []
-
     try:
-        # Ignore strict typing errors for completely untyped python-docx library
-        doc = docx.Document(str(file_path))  # type: ignore
+        elements = cast(list[Any], partition_docx(filename=str(file_path)))
 
-        # Extract text from standard paragraphs
-        for para in doc.paragraphs:  # type: ignore
-            text = str(para.text).strip()  # type: ignore
-            if text:
-                text_blocks.append(text)
-
-        # Extract text from tables to prevent data loss in structured documents
-        for table in doc.tables:  # type: ignore
-            for row in table.rows:  # type: ignore
-                row_data: list[str] = [
-                    str(cell.text).strip()  # type: ignore
-                    for cell in row.cells  # type: ignore
-                    if str(cell.text).strip()  # type: ignore
-                ]
-                if row_data:
-                    text_blocks.append(" | ".join(row_data))
-
+        return _extract_text_and_tables(elements)
     except Exception as e:
         logger.error("DOCX parsing failed", file_path=str(file_path), error=str(e))
         raise ParseError(f"Failed to parse DOCX document: {e!s}") from e
-
-    return "\n\n".join(text_blocks)
 
 
 def parse_text(file_path: Path) -> str:
@@ -90,7 +109,8 @@ def parse_text(file_path: Path) -> str:
     Extracts raw text from plain text formats (.txt, .md, .csv).
     """
     try:
-        return file_path.read_text(encoding="utf-8")
+        elements = cast(list[Any], partition_text(filename=str(file_path)))
+        return _extract_text_and_tables(elements)
     except Exception as e:
         logger.error("Text parsing failed", file_path=str(file_path), error=str(e))
         raise ParseError(f"Failed to parse text document: {e!s}") from e
