@@ -7,6 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from qdrant_client import AsyncQdrantClient
 from redis.asyncio import Redis
 
+from app.auth.rbac import check_permission
 from app.graph.state import RAGState
 from app.llm.prompts import RAG_SYSTEM_PROMPT
 from app.llm.provider import get_llm_response
@@ -54,7 +55,18 @@ async def retriever_node(state: RAGState, config: RunnableConfig) -> dict[str, A
     qdrant = cast(AsyncQdrantClient, qdrant_instance)
 
     department_id = str(user.get("department_id", ""))
-    access_level = int(filters.get("access_level", 1))
+
+    # Secure access level: Enforce maximum allowed level based on user role.
+    # Prevents IDOR (Insecure Direct Object Reference) via payload.filters.
+    user_max_access = int(
+        user.get(
+            "access_level", 5 if user.get("role") in ["admin", "hr_manager"] else 1
+        )
+    )
+    requested_access = int(filters.get("access_level", 1))
+
+    # Cap the requested access level to the user's maximum authorized level
+    access_level = min(requested_access, user_max_access)
 
     retrieved_chunks = await retrieve_context(
         masked_query=masked_query,
@@ -147,7 +159,19 @@ async def demasking_node(state: RAGState, config: RunnableConfig) -> dict[str, A
         user=user,
     )
 
-    for token, original in query_mappings.items():
-        demasked_response = demasked_response.replace(str(token), str(original))
+    # Conditional Query De-masking: Do not restore user query PII if they lack 'view_unmasked'
+    has_unmask_access = check_permission(
+        user=user, target_department_id=department_id, action="view_unmasked"
+    )
+
+    if has_unmask_access:
+        for token, original in query_mappings.items():
+            demasked_response = demasked_response.replace(str(token), str(original))
+    else:
+        logger.warning(
+            "User lacks view_unmasked permission. Query PII restoration skipped.",
+            user_id=user.get("user_id"),
+            role=user.get("role"),
+        )
 
     return {"final_response": demasked_response}
