@@ -136,3 +136,71 @@ async def test_no_results_short_circuit(mocker: MockerFixture) -> None:
     mock_llm.assert_not_called()
     # The final response won't exist because it bypassed the synthesizer and demasker nodes
     assert "final_response" not in final_state
+
+
+@pytest.mark.asyncio
+async def test_retriever_node_prevents_access_level_escalation(
+    mocker: MockerFixture,
+) -> None:
+    """
+    Tests that IDOR attempts are blocked by capping the requested access_level
+    to the user's maximum authorized access_level.
+    """
+    from app.graph.nodes import retriever_node
+
+    mock_retrieve = mocker.patch("app.graph.nodes.retrieve_context")
+    mock_retrieve.return_value = []
+
+    # User is a viewer (max access level 1) but tries to request access level 5 via payload
+    state = {
+        "masked_query": "Test query",
+        "user": {"role": "viewer", "department_id": "hr", "user_id": "user-4"},
+        "filters": {"access_level": 5},
+    }
+
+    config = {
+        "configurable": {
+            "qdrant": mocker.AsyncMock(),
+        }
+    }
+
+    await retriever_node(state, config)  # type: ignore
+
+    # Verify that retrieve_context was called with access_level 1, NOT 5
+    mock_retrieve.assert_called_once()
+    assert mock_retrieve.call_args.kwargs["access_level"] == 1
+
+
+@pytest.mark.asyncio
+async def test_demasking_node_respects_rbac_for_query_tokens(
+    mocker: MockerFixture,
+) -> None:
+    """
+    Tests that query PII mappings are NOT restored if the user lacks the 'view_unmasked' permission.
+    """
+    from app.graph.nodes import demasking_node
+
+    mocker.patch(
+        "app.masking.demasker.demask_response",
+        return_value="The salary of [PERSON_1] is $100k.",
+    )
+
+    # Viewer asks about Alice. The query analyzer generated a mapping.
+    state = {
+        "llm_response": "The salary of [PERSON_1] is $100k.",
+        "document_ids": ["doc-1"],
+        "user": {"role": "viewer", "department_id": "hr", "user_id": "user-5"},
+        "pii_mappings": {"[PERSON_1]": "Alice"},
+    }
+
+    config = {
+        "configurable": {
+            "redis": mocker.AsyncMock(),
+        }
+    }
+
+    result = await demasking_node(state, config)  # type: ignore
+
+    # The final response MUST STILL contain [PERSON_1] because the user is a viewer
+    assert "[PERSON_1]" in result["final_response"]
+    assert "Alice" not in result["final_response"]
