@@ -230,3 +230,46 @@ async def test_e2e_viewer_gets_masked_response(
     # Viewer must NEVER see demasked data
     assert "[PERSON_1]" in answer
     assert "Alice" not in answer
+
+
+@pytest.mark.asyncio
+async def test_e2e_viewer_cannot_escalate_access_level(
+    e2e_client: AsyncClient,
+    setup_e2e_users: dict[str, str],
+) -> None:
+    """E2E: Viewer attempts IDOR by requesting access_level=5, system must cap to 1."""
+    # 1. Login as Viewer
+    login_resp = await e2e_client.post(
+        "/auth/login",
+        data={
+            "username": setup_e2e_users["viewer_email"],
+            "password": setup_e2e_users["password"],
+        },
+    )
+    assert login_resp.status_code == 200, f"Login failed: {login_resp.text}"
+    token = login_resp.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Execute Query with Malicious Filter
+    with patch("app.graph.nodes.retrieve_context") as mock_retrieve:
+        mock_retrieve.return_value = []
+
+        query_resp = await e2e_client.post(
+            "/query/",
+            json={
+                "question": "Show me the executive salaries",
+                "filters": {"access_level": 5},  # IDOR Attack attempt
+            },
+            headers=headers,
+        )
+
+    assert query_resp.status_code == 200
+
+    # 3. Verify IDOR Prevention at the integration boundary
+    mock_retrieve.assert_called_once()
+    called_kwargs = mock_retrieve.call_args.kwargs
+
+    # The requested access_level=5 MUST be strictly capped to the viewer's max allowed level (1)
+    assert called_kwargs.get("access_level") == 1, (
+        "CRITICAL: IDOR vulnerability! Access level was not capped."
+    )
