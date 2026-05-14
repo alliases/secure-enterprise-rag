@@ -75,11 +75,18 @@ async def run_ingestion(
             masked_chunks_data: list[dict[str, Any]] = []
             total_pii_found = 0
 
+            # Global state for Stateful Document PII Mapping across all chunks
+            global_entity_counters: dict[str, int] = {}
+
             # 4. Mask and store PII mappings
             for chunk in chunks:
                 analyzer_results = analyze_text(chunk.text)
                 total_pii_found += len(analyzer_results)
-                masked_result = mask_text(chunk.text, analyzer_results)
+                masked_result = mask_text(
+                    text=chunk.text,
+                    analyzer_results=analyzer_results,
+                    entity_counters=global_entity_counters,
+                )
 
                 # Push generated mappings to Redis
                 await store_mappings(redis, document_id, masked_result.mappings)

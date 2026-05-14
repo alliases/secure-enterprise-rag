@@ -58,10 +58,20 @@ def analyze_text(text: str, language: str = "en") -> list[RecognizerResult]:
     return _analyzer.analyze(text=text, language=language, score_threshold=0.4)
 
 
-def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResult:
+def mask_text(
+    text: str,
+    analyzer_results: list[RecognizerResult],
+    entity_counters: dict[str, int] | None = None,
+) -> MaskedResult:
     """
     Replaces identified PII entities with incremental tokens (e.g., [PERSON_1]).
     Extracts mappings for later de-masking.
+
+    Args:
+        text: The raw text string to mask.
+        analyzer_results: List of PII entities detected by Presidio.
+        entity_counters: External state dictionary to maintain token index continuity
+                         across multiple chunks of the same document.
     """
     # 1. Resolve overlaps using Greedy Interval Scheduling
     # Sort priority: Earliest start -> Longest length -> Highest confidence score
@@ -75,13 +85,16 @@ def mask_text(text: str, analyzer_results: list[RecognizerResult]) -> MaskedResu
         if not filtered_results or res.start >= filtered_results[-1].end:
             filtered_results.append(res)
 
-    # 2. Sort results by start position descending to avoid index shifting during string manipulation
+    # 2. Sort results left-to-right (ascending) to maintain natural chronological token indexing.
     # String index shifting is prevented later by applying replacements right-to-left.
     sorted_ltr_results = sorted(filtered_results, key=lambda x: x.start)
 
     masked_text = text
     mappings: dict[str, str] = {}
-    entity_counters: dict[str, int] = {}
+
+    # Initialize local state if no external state is provided (fallback/testing)
+    if entity_counters is None:
+        entity_counters = {}
 
     # Store operations to apply them right-to-left later
     replacements: list[tuple[int, int, str, str]] = []
