@@ -7,8 +7,8 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-Orchestration-orange)](https://github.com/langchain-ai/langgraph)
 [![Qdrant](https://img.shields.io/badge/Qdrant-VectorDB-red)](https://qdrant.tech/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Coverage](https://img.shields.io/badge/Coverage-78%25-yellowgreen)](https://github.com/alliases/secure-enterprise-rag)
-[![Tests](https://img.shields.io/badge/Tests-53%20passed-brightgreen)](https://github.com/alliases/secure-enterprise-rag)
+[![Coverage](https://img.shields.io/badge/Coverage-76%25-yellowgreen)](https://github.com/alliases/secure-enterprise-rag)
+[![Tests](https://img.shields.io/badge/Tests-56%20passed-brightgreen)](https://github.com/alliases/secure-enterprise-rag)
 
 ---
 
@@ -32,9 +32,12 @@ Source document excerpt:
 
 ## ✨ Features
 
-- **PII Masking Pipeline** — Microsoft Presidio detects and replaces names, emails, phone numbers, credit cards, and custom employee IDs (`DDDD-DDDD` format) with incremental tokens (`[PERSON_1]`, `[EMPLOYEE_ID_1]`, etc.) before any data leaves the system
-- **LangGraph Orchestration** — a typed, stateful graph with conditional edges: `query_analyzer → retriever → synthesizer → validator → demasker`
-- **RBAC De-masking** — `hr_manager` users see real PII in responses for their own department; `viewer` users see tokens; `admin` users see everything
+- **PII Masking Pipeline (Stateful)** — Microsoft Presidio detects and replaces PII with incremental tokens (`[PERSON_1]`). Employs **Global Document State** to guarantee semantic entity continuity across thousands of chunks.
+- **Two-Level Hybrid Deduplication** — Enterprise-scale duplicate prevention:
+  - **Level 1 (Exact Match):** Async chunked SHA-256 stream hashing to prevent OOM, protected by **Redis Distributed Locks (SETNX)** against concurrent upload race conditions.
+  - **Level 2 (Semantic Match):** Normalizes PII tokens and applies cosine similarity thresholding (0.985) to isolated paragraphs. Merges metadata arrays (`document_ids`, `access_levels`) for existing content instead of creating redundant vectors.
+- **LangGraph Orchestration** — a typed, stateful graph with conditional edges: `query_analyzer → retriever → synthesizer → validator → demasker`.
+- **Zero-Trust RBAC & IDOR Prevention** — `hr_manager` users see real PII; `viewer` users see tokens. Features strict **Conditional Query De-masking** and intercepts payload manipulation to prevent Insecure Direct Object References (IDOR) during vector retrieval.
 - **Vector Retrieval with Metadata Filtering** — Qdrant filters by `department_id` and `access_level` to prevent cross-department data leakage
 - **Structured Audit Logging** — every `login`, `login_failed`, `ingest`, `query`, and `demask` event is persisted to PostgreSQL; logs are PII-sanitized via a custom `structlog` processor
 - **GDPR Article 17 Compliance** — `DELETE /auth/me` wipes the user account, all associated Qdrant vectors, and all Redis PII mappings in a single atomic flow
@@ -228,19 +231,25 @@ poetry install
 poetry run pytest --cov=app --cov-report=term-missing
 ```
 
-**53 tests pass** in ~12s. Current overall coverage: **78%**.
+**56+ tests pass** in ~12s. Current overall coverage: **76%** (1200 statements).
 
 | Module | Coverage |
 |---|---|
-| `app/masking/` | 90–100% |
-| `app/graph/` | 93–100% |
 | `app/auth/` | 100% |
 | `app/config.py` | 100% |
-| `app/vectorstore/qdrant_client.py` | 100% |
+| `app/db/models.py` | 100% |
+| `app/graph/` | 94–100% |
+| `app/masking/` | 90–100% |
 | `app/vectorstore/retriever.py` | 100% |
-| `app/ingestion/pipeline.py` | 97% |
+| `app/vectorstore/qdrant_client.py` | 100% |
 | `app/api/endpoints/query.py` | 84% |
-| `app/api/endpoints/ingest.py` | 82% |
+| `app/ingestion/pipeline.py` | 83% |
+| `app/logging_config/setup.py`| 81% |
+| `app/api/endpoints/ingest.py` | 70% |
+| `app/ingestion/deduplicator.py` | 59% ⚠️ |
+| `app/api/endpoints/admin.py` | 50% ⚠️ |
+| `app/api/endpoints/auth.py` | 53% ⚠️ |
+| `app/ingestion/chunker.py` | 46% ⚠️ |
 | `app/ingestion/parser.py` | 45% ⚠️ |
 | `app/llm/provider.py` | 47% ⚠️ |
 | `app/api/endpoints/health.py` | 25% ⚠️ |
@@ -291,8 +300,8 @@ secure-enterprise-rag/
 | `JWT_ALGORITHM` | JWT algorithm | `HS256` |
 | `EMBEDDING_MODEL` | Embedding model name | `text-embedding-3-small` |
 | `LLM_MODEL` | LLM model name | `gpt-4o` |
-| `CHUNK_SIZE` | Text chunk size (chars) | `1000` |
-| `CHUNK_OVERLAP` | Chunk overlap (chars) | `200` |
+| `CHUNK_SIZE` | Text chunk size (chars) | `150` |
+| `CHUNK_OVERLAP` | Chunk overlap (chars) | `20` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `APP_ENV` | Environment selector (`local`/`docker`/`production`) | `docker` |
 | `ALLOWED_ORIGINS` | CORS allowed origins (JSON list) | `["http://localhost:3000"]` |
