@@ -55,7 +55,7 @@ prometheus-client = "^0.25.0"
 asgi-correlation-id = "^4.3.4"
 pydantic = {extras = ["email"], version = "^2.13.4"}
 aiofiles = "^25.1.0"
-unstructured = "^0.22.28"
+unstructured = {extras = ["docx"], version = "^0.22.28"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"
